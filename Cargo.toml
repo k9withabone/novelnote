@@ -6,6 +6,7 @@ resolver = "3"
 authors = ["Paul Nettleton <k9@k9withabone.dev"]
 edition = "2024"
 repository = "https://github.com/k9withabone/novelnote"
+license = "MPL-2.0"
 
 [package]
 name = "novelnote"
@@ -13,5 +14,6 @@ version = "0.1.0-alpha.1"
 authors.workspace = true
 edition.workspace = true
 repository.workspace = true
+license.workspace = true
 
 [dependencies]
