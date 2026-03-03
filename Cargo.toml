@@ -8,6 +8,7 @@ edition = "2024"
 readme = "README.md"
 repository = "https://github.com/k9withabone/novelnote"
 license = "MPL-2.0"
+keywords = ["books", "self-hosted"]
 
 [workspace.lints.rust]
 ambiguous_negative_literals = "warn"
@@ -122,11 +123,18 @@ verbose_file_reads = "warn"
 [package]
 name = "novelnote"
 version = "0.1.0-alpha.1"
+description = "Self-hosted book tracker"
+categories = [
+  "web-programming",
+  "web-programming::http-server",
+  "command-line-utilities",
+]
 authors.workspace = true
 edition.workspace = true
 readme.workspace = true
 repository.workspace = true
 license.workspace = true
+keywords.workspace = true
 
 [lints]
 workspace = true
