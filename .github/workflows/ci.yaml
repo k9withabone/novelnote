@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Rust Format Check
+        run: cargo fmt --verbose --check --all
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Clippy Checks
+        run: cargo clippy --verbose --workspace --tests -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --verbose --workspace
+
+      - name: Run Tests
+        run: cargo test --verbose --workspace
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --verbose --package novelnote
+
+  build-container:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      MANIFEST: novelnote-multiarch
+    container:
+      image: quay.io/containers/buildah:latest
+      options: --security-opt seccomp=unconfined --security-opt apparmor=unconfined --device /dev/fuse:rw
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Buildah version
+        run: buildah version
+
+      - name: Create manifest
+        run: |
+          buildah manifest create \
+            --annotation "org.opencontainers.image.source=https://github.com/k9withabone/novelnote" \
+            --annotation '"org.opencontainers.image.description=Self-hosted book tracker"' \
+            --annotation "org.opencontainers.image.licenses=MPL-2.0" \
+            "${MANIFEST}"
+
+      - name: Build ARM image
+        run: |
+          buildah build \
+            --file deployment/Containerfile \
+            --manifest "${MANIFEST}" \
+            --platform linux/arm64/v8 \
+            --tag novelnote \
+            .
+
+      - name: Build x86 image
+        run: |
+          buildah build \
+            --file deployment/Containerfile \
+            --manifest "${MANIFEST}" \
+            --platform linux/amd64 \
+            --tag novelnote \
+            .
+
+  doc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-docs
+
+      - name: Build docs
+        env:
+          RUSTDOCFLAGS: "-Dwarnings"
+        run: cargo doc --verbose --workspace --document-private-items
+
+  spellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Typos
+        uses: crate-ci/typos@v1
