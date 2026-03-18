@@ -59,11 +59,13 @@ NovelNote is currently a work-in-progress.
   - [x] stdout
   - [ ] Rotating files
   - [ ] journald
+- [ ] Graceful shutdown
 - [ ] SSH interfaces
   - [ ] CLI
   - [ ] TUI
-- [ ] systemd socket activation
-  - [ ] Configurable timeout
+- [ ] systemd integration
+  - [ ] Service `Type=notify` support
+  - [ ] Socket activation with configurable timeout
 
 ## License
 

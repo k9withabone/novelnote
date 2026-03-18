@@ -3,61 +3,87 @@
 //!
 //! See the project's README for more information.
 
-use color_eyre::eyre::{Report, WrapErr};
-use jiff::{Timestamp, Unit, tz::TimeZone};
-use tracing::{Level, debug, info};
-use tracing_subscriber::{
-    EnvFilter,
-    fmt::{format, time::FormatTime},
-    util::SubscriberInitExt,
-};
+mod config;
+
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+use color_eyre::eyre::{OptionExt, Report, WrapErr};
+use directories::ProjectDirs;
+use tracing::{debug, info};
+
+use crate::config::Config;
 
 fn main() -> Result<(), Report> {
     color_eyre::install()?;
 
-    init_logging(TimeZone::system()).wrap_err("error initializing logging")?;
+    let Cli {
+        command: Command::Serve {
+            config_file,
+            config,
+        },
+    } = Cli::parse();
+
+    let dirs =
+        ProjectDirs::from("", "", "NovelNote").ok_or_eyre("could not determine home directory")?;
+
+    let config = Config::load(config, config_file, &dirs).wrap_err("error loading config")?;
+
+    config
+        .log
+        .init_logging()
+        .wrap_err("error initializing logging")?;
+
+    debug!(?config);
 
     info!("exiting");
     Ok(())
 }
 
-/// Initialize logging by setting a default [`tracing::Subscriber`].
-///
-/// # Errors
-///
-/// Returns an error if a global subscriber was already installed.
-fn init_logging(time_zone: TimeZone) -> Result<(), Report> {
-    tracing_subscriber::fmt()
-        .with_timer(ZonedTime { time_zone })
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(Level::INFO.into())
-                .from_env_lossy(),
-        )
-        .finish()
-        .try_init()
-        .wrap_err("error initializing tracing subscriber")?;
-
-    debug!("logging enabled");
-    Ok(())
+/// The command-line interface of `novelnote`.
+#[derive(Parser, Debug, Clone, PartialEq, Eq)]
+#[command(version, author, about, long_about = None)]
+pub(crate) struct Cli {
+    /// Command to execute.
+    #[command(subcommand)]
+    pub command: Command,
 }
 
-/// A [`FormatTime`] implementation using [`jiff::Zoned`].
-///
-/// The current time is rounded to the nearest microsecond.
-/// Seconds are written with six decimals of precision for consistent widths.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ZonedTime {
-    /// The time zone to write times in.
-    time_zone: TimeZone,
+/// The `novelnote` command to execute.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Command {
+    /// Start the NovelNote web server.
+    Serve {
+        /// Path to the file to use as the base configuration.
+        ///
+        /// If not set, a "layered" approach is used, combining the following files in order of descending priority:
+        ///
+        /// - `novelnote.toml` (in the current working directory)
+        /// - `${XDG_CONFIG_DIR:$HOME/.config}/novelnote/novelnote.toml` (Linux)
+        /// - `$HOME/Library/Application Support/NovelNote/novelnote.toml` (macOS)
+        /// - `%RoamingAppData%/NovelNote/config/novelnote.toml` (Windows)
+        /// - `/etc/novelnote/novelnote.toml` (Linux and macOS)
+        ///
+        /// After loading the specified config file or the above combined config, environment variables and CLI arguments are layered in to produce the final configuration.
+        ///
+        /// You can view the final configuration in the debug log output.
+        #[arg(short, long, env, verbatim_doc_comment)]
+        config_file: Option<PathBuf>,
+
+        /// Layered configuration options.
+        #[command(flatten)]
+        config: <Config as confique::Config>::Layer,
+    },
 }
 
-impl FormatTime for ZonedTime {
-    fn format_time(&self, w: &mut format::Writer) -> std::fmt::Result {
-        let now = Timestamp::now()
-            .to_zoned(self.time_zone.clone())
-            .round(Unit::Microsecond)
-            .expect("microseconds round cleanly");
-        write!(w, "{now:.6}")
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+
+    use super::*;
+
+    #[test]
+    fn verify_cli() {
+        Cli::command().debug_assert();
     }
 }
