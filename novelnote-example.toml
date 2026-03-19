@@ -1,0 +1,43 @@
+# NovelNote configuration.
+#
+# Use with `novelnote serve --config-file <path>`.
+#
+# See `novelnote serve --help` for default config file locations and additional explanations of
+# enumerated options.
+
+# Logging configuration.
+[log]
+# Where logs should be written to.
+#
+# Can be one of `stdout` (default), `stdout-no-timestamp`, or `none`.
+#
+# Can also be specified via environment variable `LOG_OUTPUT`.
+#
+# Default value: "stdout"
+#output = "stdout"
+
+# Timezone to use when writing timestamps in the log output.
+#
+# Used by the `stdout` log output mode.
+#
+# If not set, the system timezone is used if it can be determined.
+#
+# Can also be specified via environment variable `TZ`.
+#timezone =
+
+# Filter what is logged.
+#
+# Each directive can optionally contain a target, span, field(s) (with or without a value),
+# and/or level formatted like so: `target[span{field=value}]=level`. For example, `debug` will
+# enable all spans and events at the `debug` level or above. Adding a target,
+# `novelnote=debug`, limits the spans and events to those created by NovelNote directly.
+#
+# See the [`tracing_subscriber::EnvFilter`] documentation for a full description of the
+# syntax.
+#
+# [`tracing_subscriber::EnvFilter`]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+#
+# Can also be specified via environment variable `LOG_DIRECTIVES`.
+#
+# Default value: ["info"]
+#directives = ["info"]

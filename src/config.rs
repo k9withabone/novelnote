@@ -4,7 +4,7 @@ use std::{path::PathBuf, str::FromStr};
 
 use clap::{Args, ValueEnum};
 use color_eyre::eyre::{Report, WrapErr};
-use confique::Config as _;
+use confique::{Config as _, toml::FormatOptions};
 use directories::ProjectDirs;
 use jiff::{Timestamp, Unit, fmt::serde::tz, tz::TimeZone};
 use serde::{
@@ -22,10 +22,15 @@ use tracing_subscriber::{
 };
 
 /// NovelNote configuration.
+///
+/// Use with `novelnote serve --config-file <path>`.
+///
+/// See `novelnote serve --help` for default config file locations and additional explanations of
+/// enumerated options.
 #[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
 #[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
 pub(crate) struct Config {
-    /// Logging configuration. The `[log]` section in a config file.
+    /// Logging configuration.
     #[config(
         nested,
         layer_attr(command(flatten, next_help_heading = "Log Options"))
@@ -34,6 +39,11 @@ pub(crate) struct Config {
 }
 
 impl Config {
+    /// Generate a template TOML config file.
+    pub(crate) fn template() -> String {
+        confique::toml::template::<Self>(FormatOptions::default())
+    }
+
     /// Load config from CLI args and config files.
     ///
     /// If a config file path is provided, only that file is read. Otherwise, several OS standard
@@ -68,6 +78,8 @@ impl Config {
 #[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
 pub(crate) struct LogConfig {
     /// Where logs should be written to.
+    ///
+    /// Can be one of `stdout` (default), `stdout-no-timestamp`, or `none`.
     #[config(
         env = "LOG_OUTPUT",
         default = "stdout",
