@@ -79,7 +79,7 @@ impl Config {
 pub(crate) struct LogConfig {
     /// Where logs should be written to.
     ///
-    /// Can be one of `stdout` (default), `stdout-no-timestamp`, or `none`.
+    /// Can be one of `stdout` (default), `stdout-no-timestamp`, `journald`, or `none`.
     #[config(
         env = "LOG_OUTPUT",
         default = "stdout",
@@ -170,17 +170,25 @@ impl LogConfig {
             directives,
         } = self;
 
-        let (stdout, stdout_no_timestamp) = match output {
+        let (stdout, stdout_no_timestamp, journald) = match output {
             LogOutput::Stdout => (
                 Some(tracing_subscriber::fmt::layer().with_timer(ZonedTime {
                     timezone: timezone.clone().unwrap_or_else(TimeZone::system),
                 })),
                 None,
+                None,
             ),
-            LogOutput::StdoutNoTimestamp => {
-                (None, Some(tracing_subscriber::fmt::layer().without_time()))
-            }
-            LogOutput::None => (None, None),
+            LogOutput::StdoutNoTimestamp => (
+                None,
+                Some(tracing_subscriber::fmt::layer().without_time()),
+                None,
+            ),
+            LogOutput::Journald => (
+                None,
+                None,
+                Some(tracing_journald::layer().wrap_err("error connecting to journald socket")?),
+            ),
+            LogOutput::None => (None, None, None),
         };
 
         let env_filter = directives.clone().into_iter().fold(
@@ -191,6 +199,7 @@ impl LogConfig {
         tracing_subscriber::registry()
             .with(stdout)
             .with(stdout_no_timestamp)
+            .with(journald)
             .with(env_filter)
             .with(ErrorLayer::default())
             .try_init()
@@ -231,6 +240,9 @@ pub(crate) enum LogOutput {
 
     /// Write logs to stdout, without writing a timestamp.
     StdoutNoTimestamp,
+
+    /// Native logging to journald.
+    Journald,
 
     /// Disable logging.
     None,

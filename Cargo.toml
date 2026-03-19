@@ -153,4 +153,5 @@ jiff.workspace = true
 serde.workspace = true
 tracing.workspace = true
 tracing-error = "0.2.1"
+tracing-journald = "0.3.2"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

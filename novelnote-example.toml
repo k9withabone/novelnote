@@ -9,7 +9,7 @@
 [log]
 # Where logs should be written to.
 #
-# Can be one of `stdout` (default), `stdout-no-timestamp`, or `none`.
+# Can be one of `stdout` (default), `stdout-no-timestamp`, `journald`, or `none`.
 #
 # Can also be specified via environment variable `LOG_OUTPUT`.
 #

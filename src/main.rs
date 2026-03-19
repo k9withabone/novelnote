@@ -98,7 +98,7 @@ impl Command {
                     .init_logging()
                     .wrap_err("error initializing logging")?;
 
-                debug!(?config);
+                debug!(?config, "config loaded");
             }
 
             #[expect(clippy::print_stdout, reason = "no logging")]
