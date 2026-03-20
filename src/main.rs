@@ -18,13 +18,14 @@ use color_eyre::{
 };
 use directories::ProjectDirs;
 use tracing::{debug, info};
+use tracing_appender::non_blocking::WorkerGuard;
 
 use crate::config::Config;
 
 fn main() -> Result<(), Report> {
     color_eyre::install()?;
 
-    Cli::parse().command.run()?;
+    let _guard = Cli::parse().command.run()?;
 
     info!("exiting");
     Ok(())
@@ -81,7 +82,10 @@ pub(crate) enum Command {
 
 impl Command {
     /// Execute the command.
-    fn run(self) -> Result<(), Report> {
+    ///
+    /// When writing to log files, a guard which ensures the write buffers are flushed on drop is
+    /// returned.
+    fn run(self) -> Result<Option<WorkerGuard>, Report> {
         match self {
             Self::Serve {
                 config_file,
@@ -93,12 +97,13 @@ impl Command {
                 let config =
                     Config::load(config, config_file, &dirs).wrap_err("error loading config")?;
 
-                config
+                let guard = config
                     .log
-                    .init_logging()
+                    .init_logging(&dirs)
                     .wrap_err("error initializing logging")?;
 
                 debug!(?config, "config loaded");
+                Ok(guard)
             }
 
             #[expect(clippy::print_stdout, reason = "no logging")]
@@ -116,10 +121,9 @@ impl Command {
                     })?;
 
                 println!("Wrote config template to file `{}`", path.display());
+                Ok(None)
             }
         }
-
-        Ok(())
     }
 }
 

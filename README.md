@@ -55,10 +55,10 @@ NovelNote is currently a work-in-progress.
 - [ ] Configuration
   - All configuration is external. No overall "admin" user that controls server settings.
   - From CLI, Environment, and TOML file.
-- [ ] Logging
+- [x] Logging
   - [x] stdout
-  - [ ] Rotating files
-  - [ ] journald
+  - [x] Rotating files
+  - [x] journald
 - [ ] Graceful shutdown
 - [ ] SSH interfaces
   - [ ] CLI
