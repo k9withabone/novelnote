@@ -110,6 +110,23 @@ jobs:
             --tag novelnote \
             .
 
+  # Ensures `novelnote-example.toml` stays in sync with code changes.
+  config-template:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate config template
+        run: cargo run --verbose -- config-template --overwrite novelnote-example.toml 
+
+      - name: Check diff
+        run: git diff --exit-code novelnote-example.toml
+
   doc:
     runs-on: ubuntu-latest
     steps:

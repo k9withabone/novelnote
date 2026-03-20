@@ -120,9 +120,14 @@ unwrap_used = "warn"
 use_debug = "warn"
 verbose_file_reads = "warn"
 
+[workspace.dependencies]
+jiff = { version = "0.2.22", features = ["logging", "serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tracing = "0.1.44"
+
 [package]
 name = "novelnote"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 description = "Self-hosted book tracker"
 categories = [
   "web-programming",
@@ -140,3 +145,14 @@ keywords.workspace = true
 workspace = true
 
 [dependencies]
+clap = { version = "4.5.60", features = ["derive", "wrap_help", "env"] }
+color-eyre = "0.6.5"
+confique = { version = "0.4.0", features = ["toml"] }
+directories = "6.0.0"
+jiff.workspace = true
+serde.workspace = true
+tracing.workspace = true
+tracing-appender = "0.2.4"
+tracing-error = "0.2.1"
+tracing-journald = "0.3.2"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

@@ -55,15 +55,17 @@ NovelNote is currently a work-in-progress.
 - [ ] Configuration
   - All configuration is external. No overall "admin" user that controls server settings.
   - From CLI, Environment, and TOML file.
-- [ ] Logging
-  - [ ] stdout
-  - [ ] Rotating files
-  - [ ] journald
+- [x] Logging
+  - [x] stdout
+  - [x] Rotating files
+  - [x] journald
+- [ ] Graceful shutdown
 - [ ] SSH interfaces
   - [ ] CLI
   - [ ] TUI
-- [ ] systemd socket activation
-  - [ ] Configurable timeout
+- [ ] systemd integration
+  - [ ] Service `Type=notify` support
+  - [ ] Socket activation with configurable timeout
 
 ## License
 

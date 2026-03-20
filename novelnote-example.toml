@@ -1,0 +1,66 @@
+# NovelNote configuration.
+#
+# Use with `novelnote serve --config-file <path>`.
+#
+# See `novelnote serve --help` for default config file locations and additional explanations of
+# enumerated options.
+
+# Logging configuration.
+[log]
+# Where logs should be written to.
+#
+# Can be one of `stdout` (default), `stdout-no-timestamp`, `journald`, `file`, or `none`.
+#
+# Can also be specified via environment variable `LOG_OUTPUT`.
+#
+# Default value: "stdout"
+#output = "stdout"
+
+# Timezone to use when writing timestamps in the log output.
+#
+# Used by the `stdout` and `file` log output mode.
+#
+# If not set, the system timezone is used if it can be determined.
+#
+# Can also be specified via environment variable `TZ`.
+#timezone =
+
+# Filter what is logged.
+#
+# Each directive can optionally contain a target, span, field(s) (with or without a value),
+# and/or level formatted like so: `target[span{field=value}]=level`. For example, `debug` will
+# enable all spans and events at the `debug` level or above. Adding a target,
+# `novelnote=debug`, limits the spans and events to those created by NovelNote directly.
+#
+# See the [`tracing_subscriber::EnvFilter`] documentation for a full description of the
+# syntax.
+#
+# [`tracing_subscriber::EnvFilter`]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html#directives
+#
+# Can also be specified via environment variable `LOG_DIRECTIVES`.
+#
+# Default value: ["info"]
+#directives = ["info"]
+
+# Path to the directory to store the rolling log files in for the `file` log output mode.
+#
+# If not set, the following directories are used on each platform:
+#
+# - `${XDG_STATE_HOME:$HOME/.local/state}/novelnote` (Linux)
+# - `$HOME/Library/Application Support/NovelNote` (macOS)
+# - `%RoamingAppData%/NovelNote/data` (Windows)
+#
+# If the directory does not exist, it is created.
+#
+# Can also be specified via environment variable `LOG_FILE_DIRECTORY`.
+#file_directory =
+
+# Number of log files to keep.
+#
+# The `file` log output mode rotates which file it writes to daily. This option determines how
+# many log files exist in the log file directory at any given time.
+#
+# Can also be specified via environment variable `MAX_LOG_FILES`.
+#
+# Default value: 3
+#max_log_files = 3
