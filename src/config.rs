@@ -1,17 +1,22 @@
 //! The [`Config`] file format and CLI args for NovelNote.
 
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    path::PathBuf,
+    str::FromStr,
+};
 
 use clap::{Args, ValueEnum};
 use color_eyre::eyre::{Report, WrapErr};
 use confique::{Config as _, toml::FormatOptions};
 use directories::ProjectDirs;
 use jiff::{Timestamp, Unit, fmt::serde::tz, tz::TimeZone};
+use novelnote_server::Server;
 use serde::{
     Deserialize, Deserializer,
     de::{self, IntoDeserializer},
 };
-use tracing::{debug, info};
+use tracing::{debug, info, instrument};
 use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{RollingFileAppender, Rotation},
@@ -40,6 +45,13 @@ pub(crate) struct Config {
         layer_attr(command(flatten, next_help_heading = "Log Options"))
     )]
     pub log: LogConfig,
+
+    /// HTTP server configuration.
+    #[config(
+        nested,
+        layer_attr(command(flatten, next_help_heading = "HTTP Server Options"))
+    )]
+    pub http: HttpServerConfig,
 }
 
 impl Config {
@@ -335,4 +347,52 @@ pub(crate) enum LogOutput {
 
     /// Disable logging.
     None,
+}
+
+/// HTTP server configuration. The `[http]` section in a config file.
+#[derive(confique::Config, Debug, Clone, Copy, PartialEq, Eq)]
+#[config(layer_attr(derive(Args, Debug, Clone, Copy, PartialEq, Eq)))]
+pub(crate) struct HttpServerConfig {
+    /// IP address the HTTP server should bind to.
+    ///
+    /// Defaults to binding to all interfaces.
+    #[config(
+        env = "HTTP_ADDRESS",
+        default = "0.0.0.0",
+        layer_attr(arg(
+            short = 'a',
+            long,
+            env = "HTTP_ADDRESS",
+            visible_alias = "http-address",
+        ))
+    )]
+    pub bind_address: IpAddr,
+
+    /// TCP port the HTTP server should bind to.
+    #[config(
+        env = "HTTP_PORT",
+        default = 8080,
+        layer_attr(arg(short, long, visible_alias = "http-port"))
+    )]
+    pub port: u16,
+}
+
+impl HttpServerConfig {
+    /// The socket address the HTTP server should bind to.
+    const fn socket_address(&self) -> SocketAddr {
+        SocketAddr::new(self.bind_address, self.port)
+    }
+
+    /// Start the HTTP server using the configuration.
+    #[tokio::main]
+    #[instrument(skip_all)]
+    pub(crate) async fn start_server(self) -> Result<(), Report> {
+        info!("starting HTTP server");
+        let server = Server {
+            socket_address: self.socket_address(),
+        };
+        tokio::spawn(server.run())
+            .await?
+            .wrap_err("error with HTTP server")
+    }
 }

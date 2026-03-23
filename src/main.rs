@@ -103,6 +103,9 @@ impl Command {
                     .wrap_err("error initializing logging")?;
 
                 debug!(?config, "config loaded");
+
+                config.http.start_server()?;
+
                 Ok(guard)
             }
 
