@@ -20,13 +20,16 @@ pub struct Server {
 impl Server {
     /// Start the NovelNote HTTP server, binding to the configured [`SocketAddr`].
     ///
-    /// The future never completes unless there is an error.
+    /// The server will gracefully shut down when the `shutdown_signal` future completes.
     ///
     /// # Errors
     ///
     /// Returns an error if binding to the given [`SocketAddr`] fails.
-    #[instrument(level = "debug")]
-    pub async fn run(self) -> Result<(), TracedError<ServerError>> {
+    #[instrument(level = "trace", skip(shutdown_signal))]
+    pub async fn run<F>(self, shutdown_signal: F) -> Result<(), TracedError<ServerError>>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         let Self { socket_address } = self;
 
         let router = Router::new().route("/", get(async || "Hello world!"));
@@ -43,7 +46,7 @@ impl Server {
             source,
         })?;
 
-        let serve = axum::serve(listener, router);
+        let serve = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal);
         info!("listening on {address}");
         serve
             .await

@@ -156,7 +156,7 @@ directories = "6.0.0"
 jiff.workspace = true
 novelnote_server.workspace = true
 serde.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tracing.workspace = true
 tracing-appender = "0.2.4"
 tracing-error.workspace = true

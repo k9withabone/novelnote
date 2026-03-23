@@ -16,6 +16,7 @@ use serde::{
     Deserialize, Deserializer,
     de::{self, IntoDeserializer},
 };
+use tokio::{select, signal};
 use tracing::{debug, info, instrument};
 use tracing_appender::{
     non_blocking::WorkerGuard,
@@ -378,21 +379,43 @@ pub(crate) struct HttpServerConfig {
 }
 
 impl HttpServerConfig {
-    /// The socket address the HTTP server should bind to.
-    const fn socket_address(&self) -> SocketAddr {
-        SocketAddr::new(self.bind_address, self.port)
-    }
-
     /// Start the HTTP server using the configuration.
     #[tokio::main]
     #[instrument(skip_all)]
     pub(crate) async fn start_server(self) -> Result<(), Report> {
         info!("starting HTTP server");
-        let server = Server {
-            socket_address: self.socket_address(),
-        };
-        tokio::spawn(server.run())
+        tokio::spawn(Server::from(self).run(shutdown_signal()))
             .await?
             .wrap_err("error with HTTP server")
+    }
+}
+
+impl From<HttpServerConfig> for Server {
+    fn from(HttpServerConfig { bind_address, port }: HttpServerConfig) -> Self {
+        Self {
+            socket_address: SocketAddr::new(bind_address, port),
+        }
+    }
+}
+
+/// A [`Future`] which completes when `SIGINT` or `SIGTERM` is received.
+#[instrument(level = "debug")]
+async fn shutdown_signal() {
+    let interrupt = async {
+        signal::ctrl_c()
+            .await
+            .expect("error installing SIGINT handler");
+    };
+
+    #[cfg(unix)]
+    let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())
+        .expect("error installing SIGTERM handler");
+
+    #[cfg(windows)]
+    let mut terminate = signal::windows::ctrl_close().expect("error install CTRL-CLOSE handler");
+
+    select! {
+        () = interrupt => info!("SIGINT received, shutting down..."),
+        _ = terminate.recv() => info!("SIGTERM received, shutting down..."),
     }
 }

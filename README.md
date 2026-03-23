@@ -52,14 +52,14 @@ NovelNote is currently a work-in-progress.
 - [ ] User collections
   - List of books or series from any library.
   - Can be used to create ordered "To Be Read" lists.
-- [ ] Configuration
+- [x] Configuration
   - All configuration is external. No overall "admin" user that controls server settings.
   - From CLI, Environment, and TOML file.
 - [x] Logging
   - [x] stdout
   - [x] Rotating files
   - [x] journald
-- [ ] Graceful shutdown
+- [x] Graceful shutdown
 - [ ] SSH interfaces
   - [ ] CLI
   - [ ] TUI
