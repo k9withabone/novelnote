@@ -1,5 +1,5 @@
 [workspace]
-members = []
+members = ["server"]
 resolver = "3"
 
 [workspace.package]
@@ -123,11 +123,14 @@ verbose_file_reads = "warn"
 [workspace.dependencies]
 jiff = { version = "0.2.22", features = ["logging", "serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"
+tokio = "1.50.0"
 tracing = "0.1.44"
+tracing-error = "0.2.1"
 
 [package]
 name = "novelnote"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 description = "Self-hosted book tracker"
 categories = [
   "web-programming",
@@ -153,6 +156,6 @@ jiff.workspace = true
 serde.workspace = true
 tracing.workspace = true
 tracing-appender = "0.2.4"
-tracing-error = "0.2.1"
+tracing-error.workspace = true
 tracing-journald = "0.3.2"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

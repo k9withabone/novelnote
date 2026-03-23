@@ -67,6 +67,15 @@ NovelNote is currently a work-in-progress.
   - [ ] Service `Type=notify` support
   - [ ] Socket activation with configurable timeout
 
+## Packages
+
+Development of NovelNote is separated into several packages.
+
+| Package | Description |
+| ------- | ----------- |
+| `novelnote` (top-level) | The main server binary. Provides the CLI, loads configuration, and starts the server. |
+| [`novelnote_server`](./server) | The server library. Provides the HTTP server implementation. |
+
 ## License
 
 All source code for NovelNote is licensed under the [Mozilla Public License v2.0](https://www.mozilla.org/en-US/MPL/).
