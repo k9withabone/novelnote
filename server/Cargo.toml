@@ -17,6 +17,6 @@ workspace = true
 axum = "0.8.8"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }
-tower-http = { version = "0.6.8", features = ["timeout"] }
+tower-http = { version = "0.6.8", features = ["timeout", "trace"] }
 tracing.workspace = true
 tracing-error.workspace = true

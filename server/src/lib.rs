@@ -5,7 +5,7 @@ use std::{io, net::SocketAddr, time::Duration};
 use axum::{Router, http::StatusCode, routing::get};
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tower_http::timeout::TimeoutLayer;
+use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{info, instrument};
 use tracing_error::TracedError;
 
@@ -35,10 +35,13 @@ impl Server {
 
         let router = Router::new()
             .route("/", get(async || "Hello world!"))
-            // Add a timeout so requests cannot stop the server from gracefully shutting down.
-            .layer(TimeoutLayer::with_status_code(
-                StatusCode::REQUEST_TIMEOUT,
-                Duration::from_secs(15),
+            .layer((
+                TraceLayer::new_for_http(),
+                // Add a timeout so requests cannot stop the server from gracefully shutting down.
+                TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    Duration::from_secs(15),
+                ),
             ));
 
         let listener =
