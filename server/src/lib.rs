@@ -1,10 +1,11 @@
 //! `novelnote_server` is the HTTP server library for NovelNote, a self-hosted book tracker.
 
-use std::{io, net::SocketAddr};
+use std::{io, net::SocketAddr, time::Duration};
 
-use axum::{Router, routing::get};
+use axum::{Router, http::StatusCode, routing::get};
 use thiserror::Error;
 use tokio::net::TcpListener;
+use tower_http::timeout::TimeoutLayer;
 use tracing::{info, instrument};
 use tracing_error::TracedError;
 
@@ -32,7 +33,13 @@ impl Server {
     {
         let Self { socket_address } = self;
 
-        let router = Router::new().route("/", get(async || "Hello world!"));
+        let router = Router::new()
+            .route("/", get(async || "Hello world!"))
+            // Add a timeout so requests cannot stop the server from gracefully shutting down.
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                Duration::from_secs(15),
+            ));
 
         let listener =
             TcpListener::bind(socket_address)
