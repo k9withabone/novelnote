@@ -60,7 +60,7 @@ NovelNote is currently a work-in-progress.
   - [x] Rotating files
   - [x] journald
 - [x] Graceful shutdown
-- [ ] OpenAPI documentation
+- [x] OpenAPI documentation
 - [ ] SSH interfaces
   - [ ] CLI
   - [ ] TUI

@@ -20,3 +20,6 @@ tokio = { workspace = true, features = ["net"] }
 tower-http = { version = "0.6.8", features = ["timeout", "trace"] }
 tracing.workspace = true
 tracing-error.workspace = true
+utoipa = { version = "5.4.0", features = ["axum_extras"] }
+utoipa-axum = "0.2.0"
+utoipa-redoc = { version = "6.0.0", features = ["axum"] }

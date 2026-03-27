@@ -3,7 +3,7 @@ members = ["server"]
 resolver = "3"
 
 [workspace.package]
-authors = ["Paul Nettleton <k9@k9withabone.dev"]
+authors = ["Paul Nettleton <k9@k9withabone.dev>"]
 edition = "2024"
 readme = "README.md"
 repository = "https://github.com/k9withabone/novelnote"

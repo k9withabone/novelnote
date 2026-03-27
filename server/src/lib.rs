@@ -35,7 +35,7 @@ impl Server {
     {
         let Self { socket_address } = self;
 
-        let router = Router::new().nest("/api", api::router()).layer((
+        let router = Router::new().nest(api::PATH, api::router()).layer((
             TraceLayer::new_for_http(),
             // Add a timeout so requests cannot stop the server from gracefully shutting down.
             TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(15)),
