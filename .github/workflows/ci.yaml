@@ -143,6 +143,22 @@ jobs:
           RUSTDOCFLAGS: "-Dwarnings"
         run: cargo doc --verbose --workspace --document-private-items
 
+  # Builds docs as docs.rs does
+  docs-rs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Nightly Toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-docs-rs
+        uses: dtolnay/install@cargo-docs-rs
+
+      - name: Build novelnote_server docs
+        run: cargo docs-rs --verbose --package novelnote_server
+
   spellcheck:
     runs-on: ubuntu-latest
     steps:

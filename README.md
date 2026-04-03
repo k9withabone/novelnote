@@ -52,20 +52,30 @@ NovelNote is currently a work-in-progress.
 - [ ] User collections
   - List of books or series from any library.
   - Can be used to create ordered "To Be Read" lists.
-- [ ] Configuration
+- [x] Configuration
   - All configuration is external. No overall "admin" user that controls server settings.
   - From CLI, Environment, and TOML file.
 - [x] Logging
   - [x] stdout
   - [x] Rotating files
   - [x] journald
-- [ ] Graceful shutdown
+- [x] Graceful shutdown
+- [x] OpenAPI documentation
 - [ ] SSH interfaces
   - [ ] CLI
   - [ ] TUI
 - [ ] systemd integration
   - [ ] Service `Type=notify` support
   - [ ] Socket activation with configurable timeout
+
+## Packages
+
+Development of NovelNote is separated into several packages.
+
+| Package | Description |
+| ------- | ----------- |
+| `novelnote` (top-level) | The main server binary. Provides the CLI, loads configuration, and starts the server. |
+| [`novelnote_server`](./server) | The server library. Provides the HTTP server implementation. |
 
 ## License
 

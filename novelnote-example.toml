@@ -64,3 +64,21 @@
 #
 # Default value: 3
 #max_log_files = 3
+
+# HTTP server configuration.
+[http]
+# IP address the HTTP server should bind to.
+#
+# Defaults to binding to all interfaces.
+#
+# Can also be specified via environment variable `HTTP_ADDRESS`.
+#
+# Default value: "0.0.0.0"
+#bind_address = "0.0.0.0"
+
+# TCP port the HTTP server should bind to.
+#
+# Can also be specified via environment variable `HTTP_PORT`.
+#
+# Default value: 8080
+#port = 8080
