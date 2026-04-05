@@ -76,6 +76,7 @@ Development of NovelNote is separated into several packages.
 | ------- | ----------- |
 | `novelnote` (top-level) | The main server binary. Provides the CLI, loads configuration, and starts the server. |
 | [`novelnote_server`](./server) | The server library. Provides the HTTP server implementation. |
+| [`novelnote_database`](./database) | The database library. Provides the interface with the SQLite database. |
 
 ## License
 

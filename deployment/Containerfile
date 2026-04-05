@@ -20,8 +20,10 @@ RUN rustup target add $(cat /rust_target.txt)
 FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY server/Cargo.toml ./server/
+COPY database/Cargo.toml ./database/
 COPY src ./src
 COPY server/src ./server/src
+COPY database/src ./database/src
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
@@ -32,8 +34,10 @@ RUN cargo chef cook \
   --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY server/Cargo.toml ./server/
+COPY database/Cargo.toml ./database/
 COPY src ./src
 COPY server/src ./server/src
+COPY database/src ./database/src
 RUN cargo build \
   --release \
   --target $(cat /rust_target.txt)

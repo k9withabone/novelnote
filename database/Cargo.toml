@@ -1,0 +1,21 @@
+[package]
+name = "novelnote_database"
+version = "0.1.0-alpha.1"
+description = "Database library for NovelNote, a self-hosted book tracker"
+categories = ["database"]
+authors.workspace = true
+edition.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "sync"] }
+tracing.workspace = true
+tracing-error.workspace = true
