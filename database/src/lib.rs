@@ -117,10 +117,15 @@ pub enum OpenError {
     Init(#[from] InitError),
 
     /// The thread opening and initializing the database panicked.
-    #[error("panic while opening or initializing the database")]
+    #[error(
+        "panic while opening or initializing the database{}",
+        .message
+            .as_ref()
+            .map_or_else(String::new, |message| format!(" with message \"{message}\""))
+    )]
     Panic {
-        /// Object the thread panicked with.
-        object: Box<dyn Any + Send + 'static>,
+        /// Message the thread panicked with.
+        message: Option<String>,
 
         /// Tracing context.
         context: SpanTrace,
@@ -129,9 +134,9 @@ pub enum OpenError {
 
 impl OpenError {
     /// Create a [`OpenError::Panic`], capturing the current span trace.
-    fn from_panic(object: Box<dyn Any + Send + 'static>) -> Self {
+    fn from_panic(payload: Box<dyn Any + Send>) -> Self {
         Self::Panic {
-            object,
+            message: panic_payload_into_string(payload),
             context: SpanTrace::capture(),
         }
     }
@@ -175,10 +180,15 @@ pub enum CloseError {
     Database(#[from] DatabaseError),
 
     /// The connection thread panicked before closing.
-    #[error("the connection thread panicked")]
+    #[error(
+        "the connection thread panicked{}",
+        .message
+            .as_ref()
+            .map_or_else(String::new, |message| format!(" with message \"{message}\""))
+    )]
     Panic {
-        /// Object the thread panicked with.
-        object: Box<dyn Any + Send + 'static>,
+        /// Message the thread panicked with.
+        message: Option<String>,
 
         /// Tracing context.
         context: SpanTrace,
@@ -187,12 +197,26 @@ pub enum CloseError {
 
 impl CloseError {
     /// Create a [`CloseError::Panic`], capturing the current span trace.
-    fn from_panic(object: Box<dyn Any + Send + 'static>) -> Self {
+    fn from_panic(payload: Box<dyn Any + Send + 'static>) -> Self {
         Self::Panic {
-            object,
+            message: panic_payload_into_string(payload),
             context: SpanTrace::capture(),
         }
     }
+}
+
+/// Convert a payload from a caught panic into a string if that was the payload, which it usually
+/// is.
+fn panic_payload_into_string(payload: Box<dyn Any + Send>) -> Option<String> {
+    payload.downcast().map_or_else(
+        |payload| {
+            payload
+                .downcast::<&'static str>()
+                .ok()
+                .map(|string| (*string).to_owned())
+        },
+        |string| Some(*string),
+    )
 }
 
 /// Connection to the SQLite database.
