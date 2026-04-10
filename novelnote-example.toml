@@ -65,6 +65,21 @@
 # Default value: 3
 #max_log_files = 3
 
+# Database configuration.
+[database]
+# Path to the directory where the SQLite database file is placed.
+#
+# If not set, the following directories are used on each platform:
+#
+# - `${XDG_DATA_HOME:$HOME/.local/share}/novelnote` (Linux)
+# - `$HOME/Library/Application Support/NovelNote` (macOS)
+# - `%RoamingAppData%/NovelNote/data` (Windows)
+#
+# If the directory does not exist, it is created.
+#
+# Can also be specified via environment variable `DATABASE_DIRECTORY`.
+#directory =
+
 # HTTP server configuration.
 [http]
 # IP address the HTTP server should bind to.

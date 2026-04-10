@@ -5,6 +5,7 @@ mod api;
 use std::{io, net::SocketAddr, time::Duration};
 
 use axum::{Router, http::StatusCode};
+use novelnote_database::Database;
 use thiserror::Error;
 use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
@@ -14,10 +15,13 @@ use tracing_error::TracedError;
 /// Configuration for running the NovelNote HTTP server.
 ///
 /// Use [`Server::run()`] to start it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Server {
     /// Socket address the server binds to.
     pub socket_address: SocketAddr,
+
+    /// Database connection handle.
+    pub database: Database,
 }
 
 impl Server {
@@ -33,13 +37,22 @@ impl Server {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let Self { socket_address } = self;
+        let Self {
+            socket_address,
+            database,
+        } = self;
 
-        let router = Router::new().nest(api::PATH, api::router()).layer((
-            TraceLayer::new_for_http(),
-            // Add a timeout so requests cannot stop the server from gracefully shutting down.
-            TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(15)),
-        ));
+        let router = Router::new()
+            .nest(api::PATH, api::router())
+            .layer((
+                TraceLayer::new_for_http(),
+                // Add a timeout so requests cannot stop the server from gracefully shutting down.
+                TimeoutLayer::with_status_code(
+                    StatusCode::REQUEST_TIMEOUT,
+                    Duration::from_secs(15),
+                ),
+            ))
+            .with_state(database);
 
         let listener =
             TcpListener::bind(socket_address)

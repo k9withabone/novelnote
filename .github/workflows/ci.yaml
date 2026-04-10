@@ -159,6 +159,9 @@ jobs:
       - name: Build novelnote_server docs
         run: cargo docs-rs --verbose --package novelnote_server
 
+      - name: Build novelnote_database docs
+        run: cargo docs-rs --verbose --package novelnote_database
+
   spellcheck:
     runs-on: ubuntu-latest
     steps:

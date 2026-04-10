@@ -2,7 +2,9 @@
 
 #![expect(clippy::needless_for_each, reason = "`OpenApi` derive")]
 
-use axum::{Json, Router, http::StatusCode, routing::get};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
+use novelnote_database::Database;
+use tracing::{error, instrument};
 use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_redoc::{Redoc, Servable};
@@ -13,7 +15,7 @@ pub(crate) const PATH: &str = "/api";
 /// Router for `/api`.
 ///
 /// Provides all routes for NovelNote's HTTP API and documentation via Redoc.
-pub(crate) fn router() -> Router {
+pub(crate) fn router() -> Router<Database> {
     let (router, openapi) = OpenApiRouter::default()
         .routes(routes!(health_check))
         .split_for_parts();
@@ -45,8 +47,20 @@ struct ApiDoc;
 #[utoipa::path(
     get,
     path = "/health-check",
-    responses((status = OK, description = "Server is healthy.")),
+    responses(
+        (status = OK, description = "Server is healthy."),
+        (
+            status = INTERNAL_SERVER_ERROR,
+            description = "A server component is having issues, server restart recommended.",
+        ),
+    ),
 )]
-async fn health_check() -> StatusCode {
-    StatusCode::OK
+#[instrument(level = "debug", skip(database))]
+async fn health_check(State(database): State<Database>) -> StatusCode {
+    if database.is_open() {
+        StatusCode::OK
+    } else {
+        error!("database connection is closed");
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "novelnote_server"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 description = "Server library for NovelNote, a self-hosted book tracker"
 categories = ["web-programming", "web-programming::http-server"]
 authors.workspace = true
@@ -15,6 +15,7 @@ workspace = true
 
 [dependencies]
 axum = "0.8.8"
+novelnote_database.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }
 tower-http = { version = "0.6.8", features = ["timeout", "trace"] }

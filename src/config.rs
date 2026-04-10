@@ -11,13 +11,14 @@ use color_eyre::eyre::{Report, WrapErr};
 use confique::{Config as _, toml::FormatOptions};
 use directories::ProjectDirs;
 use jiff::{Timestamp, Unit, fmt::serde::tz, tz::TimeZone};
+use novelnote_database::Database;
 use novelnote_server::Server;
 use serde::{
     Deserialize, Deserializer,
     de::{self, IntoDeserializer},
 };
-use tokio::{select, signal};
-use tracing::{debug, info, instrument};
+use tokio::task::spawn_blocking;
+use tracing::{Span, debug, info, instrument};
 use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{RollingFileAppender, Rotation},
@@ -46,6 +47,13 @@ pub(crate) struct Config {
         layer_attr(command(flatten, next_help_heading = "Log Options"))
     )]
     pub log: LogConfig,
+
+    /// Database configuration.
+    #[config(
+        nested,
+        layer_attr(command(flatten, next_help_heading = "Database Options"))
+    )]
+    pub database: DatabaseConfig,
 
     /// HTTP server configuration.
     #[config(
@@ -350,6 +358,65 @@ pub(crate) enum LogOutput {
     None,
 }
 
+/// SQLite database configuration. The `[database]` section in a config file.
+#[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
+#[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
+pub(crate) struct DatabaseConfig {
+    /// Path to the directory where the SQLite database file is placed.
+    ///
+    /// If not set, the following directories are used on each platform:
+    ///
+    /// - `${XDG_DATA_HOME:$HOME/.local/share}/novelnote` (Linux)
+    /// - `$HOME/Library/Application Support/NovelNote` (macOS)
+    /// - `%RoamingAppData%/NovelNote/data` (Windows)
+    ///
+    /// If the directory does not exist, it is created.
+    #[config(
+        env = "DATABASE_DIRECTORY",
+        layer_attr(arg(
+            long = "database-directory",
+            env = "DATABASE_DIRECTORY",
+            visible_aliases = ["database-dir", "db-directory", "db-dir"],
+            value_name = "DB_DIR",
+            verbatim_doc_comment,
+        ))
+    )]
+    pub directory: Option<PathBuf>,
+}
+
+impl DatabaseConfig {
+    /// Open a SQLite database in the configured directory.
+    #[instrument(name = "open_database", skip_all)]
+    pub(crate) async fn open(&self, dirs: &ProjectDirs) -> Result<Database, Report> {
+        let Self { directory } = self;
+        let directory = directory.as_deref().unwrap_or_else(|| dirs.data_dir());
+        {
+            let span = Span::current();
+            let directory = directory.to_owned();
+            spawn_blocking(move || {
+                let _entered = span.entered();
+                if !directory.is_dir() {
+                    std::fs::create_dir_all(&directory).wrap_err_with(|| {
+                        format!(
+                            "error creating database directory `{}`",
+                            directory.display()
+                        )
+                    })?;
+                    info!(database_dir = %directory.display(), "created database directory");
+                }
+                Ok::<(), Report>(())
+            })
+            .await??;
+        }
+        let path = directory.join("novelnote.sqlite3");
+        let database = Database::open(path.clone(), 100)
+            .await
+            .wrap_err_with(|| format!("error opening database at `{}`", path.display()))?;
+        debug!(database_path = %path.display(), "opened database");
+        Ok(database)
+    }
+}
+
 /// HTTP server configuration. The `[http]` section in a config file.
 #[derive(confique::Config, Debug, Clone, Copy, PartialEq, Eq)]
 #[config(layer_attr(derive(Args, Debug, Clone, Copy, PartialEq, Eq)))]
@@ -379,43 +446,13 @@ pub(crate) struct HttpServerConfig {
 }
 
 impl HttpServerConfig {
-    /// Start the HTTP server using the configuration.
-    #[tokio::main]
-    #[instrument(skip_all)]
-    pub(crate) async fn start_server(self) -> Result<(), Report> {
-        info!("starting HTTP server");
-        tokio::spawn(Server::from(self).run(shutdown_signal()))
-            .await?
-            .wrap_err("error with HTTP server")
-    }
-}
+    /// Create [`Server`] from config.
+    pub(crate) const fn into_server(self, database: Database) -> Server {
+        let Self { bind_address, port } = self;
 
-impl From<HttpServerConfig> for Server {
-    fn from(HttpServerConfig { bind_address, port }: HttpServerConfig) -> Self {
-        Self {
+        Server {
             socket_address: SocketAddr::new(bind_address, port),
+            database,
         }
-    }
-}
-
-/// A [`Future`] which completes when `SIGINT` or `SIGTERM` is received.
-#[instrument(level = "debug")]
-async fn shutdown_signal() {
-    let interrupt = async {
-        signal::ctrl_c()
-            .await
-            .expect("error installing SIGINT handler");
-    };
-
-    #[cfg(unix)]
-    let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())
-        .expect("error installing SIGTERM handler");
-
-    #[cfg(windows)]
-    let mut terminate = signal::windows::ctrl_close().expect("error install CTRL-CLOSE handler");
-
-    select! {
-        () = interrupt => info!("SIGINT received, shutting down..."),
-        _ = terminate.recv() => info!("SIGTERM received, shutting down..."),
     }
 }

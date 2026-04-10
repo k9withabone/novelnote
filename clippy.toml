@@ -4,4 +4,5 @@ absolute-paths-max-segments = 3
 # `clap` dependency `terminal_size` uses an older version of `windows-sys`.
 allowed-duplicate-crates = ["windows-sys"]
 allowed-idents-below-min-chars = ["s", "f", "v", ".."]
-doc-valid-idents = ["NovelNote", ".."]
+doc-valid-idents = ["NovelNote", "SQLite", ".."]
+semicolon-outside-block-ignore-multiline = true
