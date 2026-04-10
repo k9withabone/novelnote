@@ -132,7 +132,7 @@ tracing-error = "0.2.1"
 
 [package]
 name = "novelnote"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 description = "Self-hosted book tracker"
 categories = [
   "web-programming",
@@ -155,6 +155,7 @@ color-eyre = "0.6.5"
 confique = { version = "0.4.0", features = ["toml"] }
 directories = "6.0.0"
 jiff.workspace = true
+novelnote_database.workspace = true
 novelnote_server.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }

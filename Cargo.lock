@@ -713,13 +713,14 @@ dependencies = [
 
 [[package]]
 name = "novelnote"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "clap",
  "color-eyre",
  "confique",
  "directories",
  "jiff",
+ "novelnote_database",
  "novelnote_server",
  "serde",
  "tokio",

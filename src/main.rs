@@ -17,7 +17,8 @@ use color_eyre::{
     eyre::{OptionExt, Report, WrapErr},
 };
 use directories::ProjectDirs;
-use tracing::{debug, info};
+use tokio::{select, signal};
+use tracing::{debug, info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 
 use crate::config::Config;
@@ -104,7 +105,7 @@ impl Command {
 
                 debug!(?config, "config loaded");
 
-                config.http.start_server()?;
+                start_server(config, &dirs)?;
 
                 Ok(guard)
             }
@@ -127,6 +128,53 @@ impl Command {
                 Ok(None)
             }
         }
+    }
+}
+
+/// Start the HTTP server.
+#[tokio::main]
+#[instrument(skip_all)]
+async fn start_server(
+    Config {
+        log: _,
+        database,
+        http,
+    }: Config,
+    dirs: &ProjectDirs,
+) -> Result<(), Report> {
+    let database = database
+        .open(dirs)
+        .await
+        .wrap_err("error opening database")?;
+
+    info!("starting HTTP server");
+    tokio::spawn(http.into_server(database.clone()).run(shutdown_signal()))
+        .await
+        .wrap_err("HTTP server panicked")?
+        .wrap_err("error with HTTP server")?;
+
+    database.close().await.wrap_err("error closing database")
+}
+
+/// A [`Future`] which completes when `SIGINT` or `SIGTERM` is received.
+#[instrument(level = "debug")]
+async fn shutdown_signal() {
+    let interrupt = async {
+        signal::ctrl_c()
+            .await
+            .expect("error installing SIGINT handler");
+    };
+
+    #[cfg(unix)]
+    let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())
+        .expect("error installing SIGTERM handler");
+
+    #[cfg(windows)]
+    let mut terminate = signal::windows::ctrl_close().expect("error install CTRL-CLOSE handler");
+
+    select! {
+        () = interrupt => info!("SIGINT received, shutting down..."),
+        _ = terminate.recv() => info!("SIGTERM received, shutting down..."),
     }
 }
 
