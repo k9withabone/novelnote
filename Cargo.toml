@@ -1,5 +1,5 @@
 [workspace]
-members = ["database", "server"]
+members = ["admin", "database", "server"]
 resolver = "3"
 
 [workspace.package]
@@ -127,8 +127,14 @@ novelnote_database = { version = "0.1.0-alpha.1", path = "database" }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 tokio = "1.50.0"
+tokio-util = "0.7.18"
 tracing = "0.1.44"
 tracing-error = "0.2.1"
+
+[workspace.dependencies.test-log]
+version = "0.2.19"
+default-features = false
+features = ["color", "trace"]
 
 [package]
 name = "novelnote"

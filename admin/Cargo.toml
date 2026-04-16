@@ -1,0 +1,36 @@
+[package]
+name = "novelnote_admin"
+version = "0.1.0-alpha.1"
+description = "Admin server and client for NovelNote, a self-hosted book tracker"
+categories = ["api-bindings"]
+authors.workspace = true
+edition.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes = "1.11.1"
+futures-util = { version = "0.3.32", default-features = false, features = ["sink", "std"] }
+interprocess = { version = "2.4.0", features = ["tokio"] }
+novelnote_database.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "sync"] }
+tokio-stream = { version = "0.1.18", default-features = false }
+tokio-util = { workspace = true, features = ["codec"] }
+tracing.workspace = true
+tracing-error.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31.2", features = ["user"] }
+
+[dev-dependencies]
+test-log.workspace = true
+tokio-util = { workspace = true, features = ["time"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+tempfile = "3.27.0"

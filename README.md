@@ -61,6 +61,9 @@ NovelNote is currently a work-in-progress.
   - [x] journald
 - [x] Graceful shutdown
 - [x] OpenAPI documentation
+- [ ] Database backups
+  - [ ] Manual
+  - [ ] Scheduled
 - [ ] SSH interfaces
   - [ ] CLI
   - [ ] TUI
@@ -77,6 +80,7 @@ Development of NovelNote is separated into several packages.
 | `novelnote` (top-level) | The main server binary. Provides the CLI, loads configuration, and starts the server. |
 | [`novelnote_server`](./server) | The server library. Provides the HTTP server implementation. |
 | [`novelnote_database`](./database) | The database library. Provides the interface with the SQLite database. |
+| [`novelnote_admin`](./admin) | Admin server and client library. Provides interface for admin commands e.g. backups and password resets. |
 
 ## License
 
