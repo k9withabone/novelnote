@@ -1,7 +1,8 @@
 //! [`AdminServer`] implementation.
 
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
+use bytes::Bytes;
 use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
     tokio::Listener,
@@ -10,13 +11,14 @@ use interprocess::local_socket::{
 #[cfg(unix)]
 use nix::unistd::Uid;
 use novelnote_database::Database;
+use rkyv::{rancor, util::AlignedVec};
 use thiserror::Error;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, instrument, trace};
 use tracing_error::TracedError;
 
-use crate::{Connection, ConnectionError};
+use crate::{ArchivedMessage, Connection, ConnectionError, DatabaseClosed, DeserializeError};
 
 /// Admin server for NovelNote. Listens on a local socket.
 #[derive(Debug)]
@@ -28,6 +30,9 @@ pub struct AdminServer {
     #[cfg(unix)]
     current_uid: Uid,
 
+    /// How long to wait when sending or receiving data before timing out.
+    timeout: Duration,
+
     /// NovelNote database handle.
     database: Database,
 }
@@ -38,6 +43,8 @@ impl AdminServer {
     /// `path` is used for the location of a Unix domain socket (Linux and macOS) or a named pipe
     /// namespace (Windows). On Windows, the path must start with `\\.\pipe\`.
     ///
+    /// Connections will time out after `timeout` expires.
+    ///
     /// # Errors
     ///
     /// Returns an error if the `path` is invalid or cannot be bound to.
@@ -46,7 +53,11 @@ impl AdminServer {
     ///
     /// Panics if not called within a Tokio runtime with IO enabled.
     #[instrument(level = "debug", skip_all, fields(path = %path.display()), err)]
-    pub fn bind(path: &Path, database: Database) -> Result<Self, TracedError<ConnectionError>> {
+    pub fn bind(
+        path: &Path,
+        timeout: Duration,
+        database: Database,
+    ) -> Result<Self, TracedError<ConnectionError>> {
         let name = path.to_fs_name::<GenericFilePath>().map_err(|source| {
             ConnectionError::InvalidPath {
                 source,
@@ -74,6 +85,7 @@ impl AdminServer {
             listener,
             #[cfg(unix)]
             current_uid: Uid::effective(),
+            timeout,
             database,
         })
     }
@@ -102,7 +114,7 @@ impl AdminServer {
             incoming_pid = peer_creds.pid(),
             "accepted connection on admin socket"
         );
-        Ok(stream.into())
+        Ok(Connection::from_stream(stream, self.timeout))
     }
 
     /// Start the admin server.
@@ -126,7 +138,7 @@ impl AdminServer {
                     break;
                 }
             };
-            let connection = match result {
+            let mut connection = match result {
                 Ok(connection) => connection,
                 Err(error) => {
                     error!(
@@ -140,8 +152,8 @@ impl AdminServer {
 
             let database = self.database.clone();
             let closed_receiver = closed_receiver.clone();
-            let handle_connection = async {
-                if let Err(error) = handle_connection(connection, database).await {
+            let handle_connection = async move {
+                if let Err(error) = handle_connection(&mut connection, &database).await {
                     error!(?error, "error handling admin socket connection: {error}");
                     debug_assert!(false, "admin socket communication error");
                 }
@@ -164,24 +176,46 @@ impl AdminServer {
 ///
 /// # Errors
 ///
-/// Returns an error if the connection cannot be read from or written to.
+/// Returns an error if the connection cannot be read from or written to, or the client's
+/// [`Message`](crate::Message) could not be deserialized.
 #[instrument(level = "trace", skip_all)]
 async fn handle_connection(
-    mut connection: Connection,
-    _database: Database,
+    connection: &mut Connection,
+    database: &Database,
 ) -> Result<(), HandleConnectionError> {
     let bytes = connection
         .read()
         .await
         .map_err(HandleConnectionError::Read)?;
 
-    // TODO: actually handle messages, for now just echo back.
+    let message = rkyv::access::<ArchivedMessage, _>(&bytes)
+        .map_err(HandleConnectionError::from_deserialize)?;
+
+    let response = Bytes::from_owner(message.response(database));
+
     connection
-        .write(bytes.freeze())
+        .write(response)
         .await
         .map_err(HandleConnectionError::Write)?;
 
     Ok(())
+}
+
+impl ArchivedMessage {
+    /// Based on the received [`Message`](crate::Message), determine the response and serialize it.
+    fn response(&self, database: &Database) -> AlignedVec {
+        let serialized_result: Result<_, rancor::Error> = match self {
+            Self::HealthCheck => {
+                let result = if database.is_open() {
+                    Ok(())
+                } else {
+                    Err(DatabaseClosed)
+                };
+                rkyv::to_bytes(&result)
+            }
+        };
+        serialized_result.expect("response cannot fail to serialize into bytes")
+    }
 }
 
 /// Possible errors when [`accepting`](AdminServer::accept()) new connections.
@@ -216,55 +250,18 @@ enum HandleConnectionError {
     #[error("error reading from connection: {0}")]
     Read(std::io::Error),
 
+    /// Error deserializing [`Message`](crate::Message) from client.
+    #[error("error deserializing message")]
+    Deserialize(#[from] DeserializeError),
+
     /// Error while writing to the [`Connection`].
     #[error("error writing to connection: {0}")]
     Write(std::io::Error),
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{error::Error, time::Duration};
-
-    use bytes::Bytes;
-    #[cfg(unix)]
-    use tempfile::TempDir;
-    use tokio_util::time::FutureExt;
-
-    use super::*;
-
-    const TIMEOUT: Duration = Duration::from_secs(3);
-
-    #[test_log::test(tokio::test)]
-    async fn echo() -> Result<(), Box<dyn Error>> {
-        #[cfg(unix)]
-        let (temp_dir, path) = {
-            let temp_dir = TempDir::new()?;
-            let path = temp_dir.path().join("test_echo.sock");
-            (temp_dir, path)
-        };
-
-        #[cfg(windows)]
-        let path = std::path::PathBuf::from(r"\\.\pipe\NoveNote_Admin_Test_Echo");
-
-        let server = AdminServer::bind(&path, Database::open_in_memory(1).await?)?;
-        let cancellation_token = CancellationToken::new();
-        let child_token = cancellation_token.child_token();
-        let server = tokio::spawn(async move { server.run(&child_token).await });
-
-        let mut connection = Connection::new(&path).timeout(TIMEOUT).await??;
-
-        let message = Bytes::from("Hello World!");
-        trace!("writing message");
-        connection.write(message.clone()).timeout(TIMEOUT).await??;
-        trace!("reading response");
-        let response = connection.read().timeout(TIMEOUT).await??;
-        assert_eq!(message, response);
-
-        cancellation_token.cancel();
-        server.await?;
-        #[cfg(unix)]
-        temp_dir.close()?;
-
-        Ok(())
+impl HandleConnectionError {
+    /// Error while deserializing.
+    const fn from_deserialize(error: rancor::Error) -> Self {
+        Self::Deserialize(DeserializeError(error))
     }
 }
