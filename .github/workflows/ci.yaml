@@ -157,7 +157,7 @@ jobs:
       - name: Build docs
         env:
           RUSTDOCFLAGS: "-Dwarnings"
-        run: cargo doc --verbose --workspace --document-private-items
+        run: cargo doc --verbose --workspace --document-private-items --no-deps
 
   # Builds docs as docs.rs does
   docs-rs:
