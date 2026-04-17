@@ -99,6 +99,7 @@ impl Database {
     /// error, or the connection thread panicked.
     #[instrument(level = "debug", skip(self))]
     pub async fn close(self) -> Result<(), CloseError> {
+        drop(self.sender);
         let close_handle = Arc::into_inner(self.close_handle).ok_or(CloseError::OpenConnection)?;
         debug!("closing database connection");
         close_handle.close_and_join().await
@@ -269,13 +270,14 @@ impl Connection {
     /// gracefully closing the connection.
     ///
     /// On close, the database is optimized.
-    #[instrument(level = "trace")]
+    #[instrument(level = "trace", skip_all)]
     fn spawn(self, buffer: usize) -> (mpsc::Sender<CallFn>, CloseHandle) {
         let Self(mut connection) = self;
 
         let (queue_sender, mut queue) = mpsc::channel::<CallFn>(buffer);
         let (close_sender, mut close_receiver) = oneshot::channel();
 
+        trace!("spawning database connection thread");
         let span = trace_span!("database_connection_thread").or_current();
         let join_handle = thread::spawn(move || {
             let _entered = span.entered();
@@ -283,10 +285,12 @@ impl Connection {
             while let Some(f) = queue.blocking_recv() {
                 f(&mut connection);
                 if let Ok(()) | Err(TryRecvError::Closed) = close_receiver.try_recv() {
+                    trace!("close signal received, closing queue");
                     queue.close();
                 }
             }
 
+            trace!("optimizing database before closing it");
             connection.pragma_update(None, "analysis_limit", 400_i32)?;
             connection.execute("PRAGMA optimize", ())?;
             connection.close().map_err(|(_, error)| error)
@@ -363,6 +367,7 @@ impl CloseHandle {
         )]
         let _ = close_sender.send(());
 
+        trace!("waiting for connection thread to close");
         spawn_blocking(|| join_handle.join().map_err(CloseError::from_panic))
             .await
             .map_err(|error| CloseError::from_panic(error.into_panic()))??
