@@ -32,7 +32,7 @@ impl Server {
     /// # Errors
     ///
     /// Returns an error if binding to the given [`SocketAddr`] fails.
-    #[instrument(level = "trace", skip(shutdown_signal))]
+    #[instrument(level = "trace", skip_all, fields(socket_address = %self.socket_address))]
     pub async fn run<F>(self, shutdown_signal: F) -> Result<(), TracedError<ServerError>>
     where
         F: Future<Output = ()> + Send + 'static,
