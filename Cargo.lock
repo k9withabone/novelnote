@@ -899,17 +899,19 @@ dependencies = [
 
 [[package]]
 name = "novelnote"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "clap",
  "color-eyre",
  "confique",
  "directories",
  "jiff",
+ "novelnote_admin",
  "novelnote_database",
  "novelnote_server",
  "serde",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-appender",
  "tracing-error",

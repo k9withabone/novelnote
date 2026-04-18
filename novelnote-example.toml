@@ -1,9 +1,51 @@
 # NovelNote configuration.
 #
-# Use with `novelnote serve --config-file <path>`.
+# Use with `novelnote --config-file <path>`.
 #
-# See `novelnote serve --help` for default config file locations and additional explanations of
-# enumerated options.
+# See `novelnote --help` for default config file locations and `novelnote serve --help` for
+# additional explanations of enumerated options.
+
+# Admin socket configuration.
+#
+# By default, `novelnote serve` will, in addition to the HTTP server, start an admin server.
+# It binds to a Unix domain socket (Linux and macOS) or named pipe (Windows) that other
+# commands, e.g. `novelnote backup`, use to communicate with the main process.
+[admin]
+# Control whether the admin socket is enabled (default).
+#
+# Disabling the admin socket is not recommended as it is required for some commands, e.g.
+# `novelnote backup`, to function.
+#
+# Can also be specified via environment variable `ADMIN_SOCKET_ENABLED`.
+#
+# Default value: true
+#enabled = true
+
+# Admin socket path.
+#
+# On Linux and macOS, this is the path of the Unix domain socket. If the directory for the
+# socket does not exist, it is created. For Linux, the default is
+# `${XDG_RUNTIME_DIR}/novelnote/novelnote_admin.sock`. For macOS the default is
+# `$HOME/Library/Application Support/NovelNote/novelnote_admin.sock`.
+#
+# On Windows, this is the named pipe namespace. It must start with `\\.\pipe\` and the default
+# is `\\.\pipe\NovelNote_Admin`.
+#
+# Can also be specified via environment variable `ADMIN_SOCKET_PATH`.
+#socket_path =
+
+# How long each connection will attempt to read or write before timing out.
+#
+# See the [`jiff` "friendly" format] for examples of how this may be specified.
+#
+# The default is 5 seconds. It must be less than 1 minute.
+#
+# [`jiff` "friendly" format]: https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html
+#
+# Can also be specified via environment variable `ADMIN_SOCKET_TIMEOUT`.
+#
+# Default value: "5 seconds"
+#timeout = "5 seconds"
 
 # Logging configuration.
 [log]
@@ -65,7 +107,7 @@
 # Default value: 3
 #max_log_files = 3
 
-# Database configuration.
+# SQLite database configuration.
 [database]
 # Path to the directory where the SQLite database file is placed.
 #

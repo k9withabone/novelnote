@@ -2,7 +2,18 @@
 
 absolute-paths-max-segments = 3
 # `clap` dependency `terminal_size` uses an older version of `windows-sys`.
-allowed-duplicate-crates = ["windows-sys"]
+allowed-duplicate-crates = [
+  "windows-sys",
+  "windows-targets",
+  "windows_aarch64_gnullvm",
+  "windows_aarch64_msvc",
+  "windows_i686_gnu",
+  "windows_i686_gnullvm",
+  "windows_i686_msvc",
+  "windows_x86_64_gnu",
+  "windows_x86_64_gnullvm",
+  "windows_x86_64_msvc",
+]
 allowed-idents-below-min-chars = ["s", "f", "v", ".."]
 doc-valid-idents = ["NovelNote", "SQLite", ".."]
 semicolon-outside-block-ignore-multiline = true

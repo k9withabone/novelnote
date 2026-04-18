@@ -122,8 +122,9 @@ verbose_file_reads = "warn"
 
 [workspace.dependencies]
 jiff = { version = "0.2.22", features = ["logging", "serde"] }
-novelnote_server = { version = "0.1.0-alpha.2", path = "server" }
+novelnote_admin = { version = "0.1.0-alpha.1", path = "admin" }
 novelnote_database = { version = "0.1.0-alpha.1", path = "database" }
+novelnote_server = { version = "0.1.0-alpha.2", path = "server" }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 tokio = "1.50.0"
@@ -138,7 +139,7 @@ features = ["color", "trace"]
 
 [package]
 name = "novelnote"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 description = "Self-hosted book tracker"
 categories = [
   "web-programming",
@@ -161,10 +162,12 @@ color-eyre = "0.6.5"
 confique = { version = "0.4.0", features = ["toml"] }
 directories = "6.0.0"
 jiff.workspace = true
+novelnote_admin.workspace = true
 novelnote_database.workspace = true
 novelnote_server.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tokio-util.workspace = true
 tracing.workspace = true
 tracing-appender = "0.2.4"
 tracing-error.workspace = true
