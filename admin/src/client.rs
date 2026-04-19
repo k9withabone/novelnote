@@ -13,7 +13,9 @@ use rkyv::{
 use thiserror::Error;
 use tracing::instrument;
 
-use crate::{Connection, ConnectionError, DatabaseClosed, DeserializeError, Message};
+use crate::{
+    Connection, ConnectionError, DatabaseClosed, DeserializeError, Message, ResponseError,
+};
 
 /// Admin socket client for NovelNote. Connects to a local socket.
 #[derive(Debug)]
@@ -50,6 +52,19 @@ impl AdminClient {
     /// cannot be read or deserialized, or the server's database connection is closed.
     pub async fn health_check(&mut self) -> Result<(), HealthCheckError> {
         self.request_response_deserialize::<Result<(), DatabaseClosed>>(&Message::HealthCheck)
+            .await?
+            .map_err(Into::into)
+    }
+
+    /// Send a request to the admin socket to backup the database to `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection times out, the request cannot be sent, the response
+    /// cannot be read or deserialized, the server's database connection is closed, or the database
+    /// backup fails.
+    pub async fn backup(&mut self, path: String) -> Result<(), RequestError> {
+        self.request_response_deserialize::<Result<(), ResponseError>>(&Message::Backup { path })
             .await?
             .map_err(Into::into)
     }
@@ -117,8 +132,8 @@ impl AdminClient {
 /// Error returned when [`AdminClient::health_check()`] fails.
 #[derive(Error, Debug)]
 pub enum HealthCheckError {
-    /// Error communication with the [`AdminServer`](crate::AdminServer).
-    #[error("error communicating with admin server for health check")]
+    /// Error communicating with the admin socket.
+    #[error("error communicating with admin socket")]
     Communication(#[from] CommunicationError),
 
     /// Server's database connection is closed, server restart recommended.
@@ -132,7 +147,35 @@ impl From<DatabaseClosed> for HealthCheckError {
     }
 }
 
-/// Error with [`AdminClient`]'s communication with the [`AdminServer`](crate::AdminServer).
+/// Error returned when a request to the admin socket fails or the response is an error.
+#[derive(Error, Debug)]
+pub enum RequestError {
+    /// Error communicating with the admin socket.
+    #[error("error communicating with admin socket")]
+    Communication(#[from] CommunicationError),
+
+    /// The database returned an error when processing the request.
+    #[error("database error: {error_message}")]
+    Database {
+        /// Message from the database error.
+        error_message: String,
+    },
+
+    /// The server's database connection is closed, server restart recommended.
+    #[error("database connection is closed, server restart recommended")]
+    DatabaseClosed,
+}
+
+impl From<ResponseError> for RequestError {
+    fn from(value: ResponseError) -> Self {
+        match value {
+            ResponseError::Database { error_message } => Self::Database { error_message },
+            ResponseError::DatabaseClosed => Self::DatabaseClosed,
+        }
+    }
+}
+
+/// Error communicating with the admin socket.
 #[derive(Error, Debug)]
 pub enum CommunicationError {
     /// Error sending message.

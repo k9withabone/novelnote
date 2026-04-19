@@ -7,6 +7,7 @@ mod client;
 mod server;
 
 use std::{
+    error::Error,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -16,6 +17,7 @@ use futures_util::SinkExt;
 use interprocess::local_socket::{
     GenericFilePath, ToFsName, tokio::Stream, traits::tokio::Stream as _,
 };
+use novelnote_database::ExecuteError;
 use rkyv::{Archive, Deserialize, Serialize, rancor};
 use thiserror::Error;
 use tokio_stream::StreamExt;
@@ -25,7 +27,9 @@ use tokio_util::{
 };
 
 pub use self::{
-    client::{AdminClient, CommunicationError, HealthCheckError, ReceiveError, SendError},
+    client::{
+        AdminClient, CommunicationError, HealthCheckError, ReceiveError, RequestError, SendError,
+    },
     server::AdminServer,
 };
 
@@ -136,10 +140,17 @@ pub enum ConnectionError {
 }
 
 /// Messages that can be sent from [`AdminClient`] to [`AdminServer`].
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug))]
 enum Message {
     /// Check that the server is running and the database is open.
     HealthCheck,
+
+    /// Perform a database backup.
+    Backup {
+        /// Path of the new backup.
+        path: String,
+    },
 }
 
 /// Error when deserializing from bytes fails.
@@ -152,11 +163,34 @@ pub struct DeserializeError(#[source] rancor::Error);
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 struct DatabaseClosed;
 
+/// Error returned from the [`AdminServer`] when a request from the [`AdminClient`] fails.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+enum ResponseError {
+    /// The database returned an error when processing the request.
+    Database {
+        /// Message from the database error.
+        error_message: String,
+    },
+
+    /// The server's database connection is closed.
+    DatabaseClosed,
+}
+
+impl From<ExecuteError> for ResponseError {
+    fn from(value: ExecuteError) -> Self {
+        match value {
+            ExecuteError::Database(error) => Self::Database {
+                error_message: error.source().map_or_else(String::new, ToString::to_string),
+            },
+            ExecuteError::Closed => Self::DatabaseClosed,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-
     use novelnote_database::Database;
+    use tempfile::NamedTempFile;
     #[cfg(unix)]
     use tempfile::TempDir;
     use tokio_util::sync::CancellationToken;
@@ -164,7 +198,11 @@ mod tests {
     use super::*;
 
     /// Run an [`AdminServer`], connect an [`AdminClient`] to it, and execute the closure.
-    async fn with_admin_socket<P, F, E>(path: P, f: F) -> Result<(), Box<dyn Error>>
+    async fn with_admin_socket<P, F, E>(
+        path: P,
+        database: Database,
+        f: F,
+    ) -> Result<(), Box<dyn Error>>
     where
         P: AsRef<Path>,
         F: AsyncFnOnce(&mut AdminClient) -> Result<(), E>,
@@ -182,7 +220,7 @@ mod tests {
 
         let timeout = Duration::from_secs(3);
 
-        let server = AdminServer::bind(&path, timeout, Database::open_in_memory(1).await?)?;
+        let server = AdminServer::bind(&path, timeout, database)?;
         let cancellation_token = CancellationToken::new();
         let child_token = cancellation_token.child_token();
         let server = tokio::spawn(async move { server.run(&child_token).await });
@@ -198,11 +236,34 @@ mod tests {
         Ok(())
     }
 
+    /// Test [`AdminClient::health_check()`].
     #[test_log::test(tokio::test)]
     async fn health_check() -> Result<(), Box<dyn Error>> {
-        with_admin_socket("test_health_check", async |client| {
-            client.health_check().await
-        })
+        with_admin_socket(
+            "test_health_check",
+            Database::open_in_memory(1).await?,
+            async |client| client.health_check().await,
+        )
         .await
+    }
+
+    /// Test [`AdminClient::backup()`].
+    #[test_log::test(tokio::test)]
+    async fn backup() -> Result<(), Box<dyn Error>> {
+        let database = Database::open_in_memory(1).await?;
+        // TODO: actually write something to the database.
+
+        let backup_file = NamedTempFile::new()?.into_temp_path();
+        let backup_path = backup_file.to_string_lossy().into_owned();
+        with_admin_socket("test_backup", database, async |client| {
+            client.backup(backup_path).await
+        })
+        .await?;
+
+        // TODO: check what was written to the database is in the backup.
+        assert!(backup_file.is_file());
+
+        backup_file.close()?;
+        Ok(())
     }
 }

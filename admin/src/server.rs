@@ -18,7 +18,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, debug, error, info, instrument, trace};
 use tracing_error::TracedError;
 
-use crate::{ArchivedMessage, Connection, ConnectionError, DatabaseClosed, DeserializeError};
+use crate::{
+    ArchivedMessage, Connection, ConnectionError, DatabaseClosed, DeserializeError, ResponseError,
+};
 
 /// Admin server for NovelNote. Listens on a local socket.
 #[derive(Debug)]
@@ -190,8 +192,9 @@ async fn handle_connection(
 
     let message = rkyv::access::<ArchivedMessage, _>(&bytes)
         .map_err(HandleConnectionError::from_deserialize)?;
+    trace!(?message, "message received from admin socket");
 
-    let response = Bytes::from_owner(message.response(database));
+    let response = Bytes::from_owner(message.response(database).await);
 
     connection
         .write(response)
@@ -203,7 +206,7 @@ async fn handle_connection(
 
 impl ArchivedMessage {
     /// Based on the received [`Message`](crate::Message), determine the response and serialize it.
-    fn response(&self, database: &Database) -> AlignedVec {
+    async fn response(&self, database: &Database) -> AlignedVec {
         let serialized_result: Result<_, rancor::Error> = match self {
             Self::HealthCheck => {
                 let result = if database.is_open() {
@@ -211,6 +214,16 @@ impl ArchivedMessage {
                 } else {
                     Err(DatabaseClosed)
                 };
+                rkyv::to_bytes(&result)
+            }
+            Self::Backup { path } => {
+                let result = database
+                    .backup(path.as_str().to_owned())
+                    .await
+                    .map_err(|error| {
+                        error!(?error, %path, "error during database backup");
+                        ResponseError::from(error)
+                    });
                 rkyv::to_bytes(&result)
             }
         };

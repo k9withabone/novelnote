@@ -31,6 +31,4 @@ nix = { version = "0.31.2", features = ["user"] }
 
 [dev-dependencies]
 test-log.workspace = true
-
-[target.'cfg(unix)'.dev-dependencies]
 tempfile.workspace = true
