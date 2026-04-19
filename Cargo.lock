@@ -944,6 +944,7 @@ name = "novelnote_database"
 version = "0.1.0-alpha.1"
 dependencies = [
  "rusqlite",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",

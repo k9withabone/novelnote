@@ -126,6 +126,7 @@ novelnote_admin = { version = "0.1.0-alpha.1", path = "admin" }
 novelnote_database = { version = "0.1.0-alpha.1", path = "database" }
 novelnote_server = { version = "0.1.0-alpha.2", path = "server" }
 serde = { version = "1.0.228", features = ["derive"] }
+tempfile = "3.27.0"
 thiserror = "2.0.18"
 tokio = "1.50.0"
 tokio-util = "0.7.18"

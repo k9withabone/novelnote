@@ -91,6 +91,54 @@ impl Database {
         !self.sender.is_closed()
     }
 
+    /// Backup the database to a new SQLite database file.
+    ///
+    /// The backup uses the [`VACUUM INTO`](https://sqlite.org/lang_vacuum.html#vacuuminto) command.
+    /// It may take more time than a simple file copy, but the backup will be smaller.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database is closed or the backup fails.
+    //
+    // Takes a string for the path because it is used as a SQL parameter.
+    #[instrument(level = "trace", skip_all, fields(path = path.as_ref()))]
+    pub async fn backup<P>(&self, path: P) -> Result<(), ExecuteError>
+    where
+        P: AsRef<str> + Send + 'static,
+    {
+        self.call(move |connection| {
+            connection
+                .execute("VACUUM INTO ?1", [path.as_ref()])
+                .map(|_| ())
+        })
+        .await?
+        .map_err(ExecuteError::from_rusqlite)
+    }
+
+    /// Pass a function to call on the connection's thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if connection has been closed.
+    async fn call<T, F>(&self, f: F) -> Result<T, ConnectionClosed>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut rusqlite::Connection) -> T + Send + 'static,
+    {
+        let (sender, receiver) = oneshot::channel();
+        // Channel capacity reserved before sending to avoid Box allocation when channel is full.
+        self.sender.reserve().await?.send(Box::new(|connection| {
+            #[expect(
+                let_underscore_drop,
+                clippy::let_underscore_must_use,
+                reason = "receiver is never dropped"
+            )]
+            let _ = sender.send(f(connection));
+        }));
+
+        receiver.await.map_err(Into::into)
+    }
+
     /// Close the database connection.
     ///
     /// # Errors
@@ -168,6 +216,49 @@ impl DatabaseError {
 #[derive(Error, Debug)]
 #[error("error setting pragma options")]
 pub struct InitError(#[from] pub DatabaseError);
+
+/// Error returned when executing a command on the [`Database`] connection.
+#[derive(Error, Debug)]
+pub enum ExecuteError {
+    /// SQLite returned an error when executing the command.
+    #[error("SQLite error")]
+    Database(#[from] DatabaseError),
+
+    /// Database connection is closed.
+    #[error("database connection is closed")]
+    Closed,
+}
+
+impl From<ConnectionClosed> for ExecuteError {
+    fn from(_: ConnectionClosed) -> Self {
+        Self::Closed
+    }
+}
+
+impl ExecuteError {
+    /// Create [`ExecuteError::Database`] from a [`rusqlite::Error`].
+    fn from_rusqlite(source: rusqlite::Error) -> Self {
+        DatabaseError::new(source).into()
+    }
+}
+
+/// Error returned when attempting to send a message to the connection thread but the channel is
+/// already closed.
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[error("connection to the database is closed")]
+struct ConnectionClosed;
+
+impl<T> From<mpsc::error::SendError<T>> for ConnectionClosed {
+    fn from(_: mpsc::error::SendError<T>) -> Self {
+        Self
+    }
+}
+
+impl From<oneshot::error::RecvError> for ConnectionClosed {
+    fn from(_: oneshot::error::RecvError) -> Self {
+        Self
+    }
+}
 
 /// Error returned when [closing](Database::close()) the [`Database`] connection fails.
 #[derive(Error, Debug)]
@@ -372,5 +463,47 @@ impl CloseHandle {
             .await
             .map_err(|error| CloseError::from_panic(error.into_panic()))??
             .map_err(|error| DatabaseError::new(error).into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use tempfile::NamedTempFile;
+
+    use super::*;
+
+    /// Test [`Database::backup()`] by:
+    ///
+    /// 1. Opening an in-memory database.
+    /// 2. Creating a table.
+    /// 3. Inserting a value.
+    /// 4. Backing up the database.
+    /// 5. Opening the backup.
+    /// 6. Reading the inserted value.
+    #[tokio::test]
+    async fn backup() -> Result<(), Box<dyn Error>> {
+        let database = Database::open_in_memory(1).await?;
+        database
+            .call(|connection| {
+                connection.execute_batch(
+                    "CREATE TABLE test(int INTEGER); INSERT INTO test (int) VALUES (42);",
+                )
+            })
+            .await??;
+
+        let backup_file = NamedTempFile::new()?.into_temp_path();
+        let backup_path = backup_file.to_string_lossy().into_owned();
+        database.backup(backup_path).await?;
+
+        let result: u8 = Database::open(backup_file.to_owned(), 1)
+            .await?
+            .call(|connection| connection.query_one("SELECT int FROM test", (), |row| row.get(0)))
+            .await??;
+        assert_eq!(result, 42);
+
+        backup_file.close()?;
+        Ok(())
     }
 }
