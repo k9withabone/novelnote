@@ -8,22 +8,27 @@ mod config;
 use std::{
     fs::File,
     io::{self, Write},
+    num::NonZero,
     path::{Path, PathBuf},
 };
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use color_eyre::{
     Section,
     eyre::{OptionExt, Report, WrapErr, eyre},
 };
 use directories::ProjectDirs;
+use jiff::{Timestamp, Unit, civil::DateTime, tz::TimeZone};
 use novelnote_admin::AdminClient;
 use tokio::{select, signal, try_join};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
 
-use crate::config::{AdminConfig, Config};
+use crate::config::{AdminConfig, Config, DatabaseConfig, timezone_value_parser};
+
+/// Filename prefix used for database backups.
+const BACKUP_PREFIX: &str = "novelnote_backup_";
 
 fn main() -> Result<(), Report> {
     color_eyre::install()?;
@@ -102,6 +107,11 @@ enum Command {
         admin_config: <AdminConfig as confique::Config>::Layer,
     },
 
+    /// Backup the database.
+    ///
+    /// Requires the NovelNote admin socket to be enabled.
+    Backup(#[command(flatten)] BackupArgs),
+
     /// Generate a sample config file to use with `novelnote --config-file`.
     ConfigTemplate {
         /// Whether to overwrite any existing file at the given path.
@@ -129,9 +139,10 @@ impl Command {
                 let config =
                     Config::load(config, config_file, dirs).wrap_err("error loading config")?;
 
+                let timezone = config.timezone.clone().unwrap_or_else(TimeZone::system);
                 let guard = config
                     .log
-                    .init_logging(dirs)
+                    .init_logging(timezone, dirs)
                     .wrap_err("error initializing logging")?;
 
                 debug!(?config, "config loaded");
@@ -152,6 +163,11 @@ impl Command {
                         .wrap_err("error performing health check")
                 })?;
 
+                Ok(None)
+            }
+
+            Self::Backup(args) => {
+                args.backup(config_file, dirs)?;
                 Ok(None)
             }
 
@@ -176,11 +192,147 @@ impl Command {
     }
 }
 
+/// Options for the `novelnote backup` [`Command`].
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+struct BackupArgs {
+    /// Timezone to use when determining the timestamp for the backup filename.
+    ///
+    /// By default, the system timezone is used if it can be determined.
+    #[arg(
+        long,
+        env = "TZ",
+        visible_alias = "tz",
+        value_parser = timezone_value_parser,
+        allow_hyphen_values = true,
+    )]
+    timezone: Option<TimeZone>,
+
+    /// Admin socket configuration options.
+    #[command(flatten)]
+    admin: <AdminConfig as confique::Config>::Layer,
+
+    /// Database configuration options.
+    #[command(flatten)]
+    database: <DatabaseConfig as confique::Config>::Layer,
+}
+
+impl BackupArgs {
+    /// Perform a backup using the configuration and remove old backups.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if loading the config fails, the backup directory path isn't UTF-8,
+    /// creating the backup directory fails, creating the backup fails, or there is an error
+    /// removing old backups.
+    #[expect(clippy::print_stdout, reason = "no logging")]
+    fn backup(self, config_file: Option<PathBuf>, dirs: &ProjectDirs) -> Result<(), Report> {
+        let Config {
+            timezone,
+            admin,
+            log: _,
+            database,
+            http: _,
+        } = Config::load(self.into(), config_file, dirs).wrap_err("error loading config")?;
+
+        let timezone = timezone.unwrap_or_else(TimeZone::system);
+        let now = Timestamp::now()
+            .to_zoned(timezone)
+            .datetime()
+            .round(Unit::Second)
+            .expect("seconds round cleanly");
+        let now = format!("{now:.0}").replace(':', "");
+
+        let backup_dir = database.backup_directory(dirs);
+
+        #[expect(clippy::map_err_ignore, reason = "using `backup_dir`")]
+        let backup_path = backup_dir
+            .join(format!("{BACKUP_PREFIX}{now}.sqlite3"))
+            .into_os_string()
+            .into_string()
+            .map_err(|_| {
+                eyre!(
+                    "backup directory must be UTF-8, backup dir: `{}`",
+                    backup_dir.display()
+                )
+            })?;
+
+        if !backup_dir.is_dir() {
+            std::fs::create_dir_all(&backup_dir)
+                .wrap_err("error creating database backup directory")?;
+            println!(
+                "Created database backup directory: `{}`",
+                backup_dir.display()
+            );
+        }
+
+        with_admin_client(admin, dirs, async move |mut client| {
+            client
+                .backup(backup_path.clone())
+                .await
+                .wrap_err_with(|| format!("error creating database backup at `{backup_path}`"))?;
+            println!("Created backup: `{backup_path}`");
+            Ok(())
+        })?;
+
+        remove_old_backups(&backup_dir, database.backup.keep_last)
+    }
+}
+
+/// Remove backups older than the last `keep_last` backups.
+///
+/// # Errors
+///
+/// Returns an error if the backup directory cannot be read or removing an old backup fails.
+fn remove_old_backups(backup_dir: &Path, keep_last: NonZero<u8>) -> Result<(), Report> {
+    // Read the contents of the backup directory, filtering for filenames matching the backup
+    // filename format.
+    let mut backups = std::fs::read_dir(backup_dir)
+        .wrap_err_with(|| format!("error reading backup directory: `{}`", backup_dir.display()))?
+        .filter_map(|entry| match entry {
+            Ok(entry) => match entry.file_type() {
+                Ok(file_type) if file_type.is_file() => {
+                    let backup_date_time: DateTime = entry
+                        .file_name()
+                        .to_string_lossy()
+                        .strip_prefix(BACKUP_PREFIX)?
+                        .strip_suffix(".sqlite3")?
+                        .parse()
+                        .ok()?;
+                    Some(Ok((entry.path(), backup_date_time)))
+                }
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            },
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .wrap_err_with(|| {
+            format!(
+                "error reading database backup directory: `{}`",
+                backup_dir.display()
+            )
+        })?;
+
+    // Sort backups from newest to oldest.
+    #[expect(clippy::min_ident_chars, reason = "comparison")]
+    backups.sort_unstable_by(|(_, a), (_, b)| b.cmp(a));
+
+    #[expect(clippy::print_stdout, reason = "no logging")]
+    for (path, _) in backups.into_iter().skip(u8::from(keep_last).into()) {
+        std::fs::remove_file(&path)
+            .wrap_err_with(|| format!("error removing old backup `{}`", path.display()))?;
+        println!("Removed old backup `{}`", path.display());
+    }
+
+    Ok(())
+}
+
 /// Run the HTTP and admin servers.
 #[tokio::main]
 #[instrument(skip_all)]
 async fn run_servers(
     Config {
+        timezone: _,
         admin,
         log: _,
         database,

@@ -1,7 +1,9 @@
 //! The [`Config`] file format and CLI args for NovelNote.
 
 use std::{
+    borrow::Cow,
     net::{IpAddr, SocketAddr},
+    num::NonZero,
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
@@ -37,6 +39,8 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
+use crate::BackupArgs;
+
 /// NovelNote configuration.
 ///
 /// Use with `novelnote --config-file <path>`.
@@ -46,6 +50,27 @@ use tracing_subscriber::{
 #[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
 #[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
 pub(crate) struct Config {
+    /// Timezone to use when writing timestamps.
+    ///
+    /// Used by the `stdout` and `file` log output modes and database backup filenames.
+    ///
+    /// By default, the system timezone is used if it can be determined.
+    ///
+    /// Does not affect how timestamps are stored in the database (always in UTC) or how they are
+    /// displayed to the user (local timezone).
+    #[config(
+        env = "TZ",
+        deserialize_with = tz::required::deserialize,
+        layer_attr(arg(
+            long,
+            env = "TZ",
+            visible_alias = "tz",
+            value_parser = timezone_value_parser,
+            allow_hyphen_values = true,
+        ))
+    )]
+    pub timezone: Option<TimeZone>,
+
     /// Admin socket configuration.
     ///
     /// By default, `novelnote serve` will, in addition to the HTTP server, start an admin server.
@@ -65,6 +90,34 @@ pub(crate) struct Config {
     /// HTTP server configuration.
     #[config(nested, layer_attr(command(flatten)))]
     pub http: HttpServerConfig,
+}
+
+/// Parse [`TimeZone`] from a string.
+///
+/// Used for parsing the `--timezone` CLI arg in [`Config`].
+pub(crate) fn timezone_value_parser(value: &str) -> Result<TimeZone, de::value::Error> {
+    tz::required::deserialize(value.into_deserializer())
+}
+
+/// Partial NovelNote configuration.
+type ConfigLayer = <Config as confique::Config>::Layer;
+
+impl From<BackupArgs> for ConfigLayer {
+    fn from(
+        BackupArgs {
+            timezone,
+            admin,
+            database,
+        }: BackupArgs,
+    ) -> Self {
+        Self {
+            timezone,
+            admin,
+            log: confique::Layer::empty(),
+            database,
+            http: confique::Layer::empty(),
+        }
+    }
 }
 
 impl Config {
@@ -424,24 +477,6 @@ pub(crate) struct LogConfig {
     )]
     pub output: LogOutput,
 
-    /// Timezone to use when writing timestamps in the log output.
-    ///
-    /// Used by the `stdout` and `file` log output mode.
-    ///
-    /// If not set, the system timezone is used if it can be determined.
-    #[config(
-        env = "TZ",
-        deserialize_with = tz::required::deserialize,
-        layer_attr(arg(
-            long,
-            env = "TZ",
-            visible_alias = "tz",
-            value_parser = timezone_value_parser,
-            allow_hyphen_values = true,
-        ))
-    )]
-    pub timezone: Option<TimeZone>,
-
     /// Filter what is logged.
     ///
     /// Each directive can optionally contain a target, span, field(s) (with or without a value),
@@ -495,13 +530,6 @@ pub(crate) struct LogConfig {
     pub max_log_files: usize,
 }
 
-/// Parse [`TimeZone`] from a string.
-///
-/// Used for parsing the `--timezone` CLI arg in [`LogConfig`].
-fn timezone_value_parser(value: &str) -> Result<TimeZone, de::value::Error> {
-    tz::required::deserialize(value.into_deserializer())
-}
-
 /// A [`Directive`] wrapper implementing [`Deserialize`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LogDirective(Directive);
@@ -531,10 +559,13 @@ impl LogConfig {
     /// # Errors
     ///
     /// Returns an error if a global subscriber was already installed.
-    pub(crate) fn init_logging(&self, dirs: &ProjectDirs) -> Result<Option<WorkerGuard>, Report> {
+    pub(crate) fn init_logging(
+        &self,
+        timezone: TimeZone,
+        dirs: &ProjectDirs,
+    ) -> Result<Option<WorkerGuard>, Report> {
         let Self {
             output,
-            timezone,
             directives,
             file_directory,
             max_log_files,
@@ -543,7 +574,7 @@ impl LogConfig {
         let mut created_log_dir = None;
         let (stdout, stdout_no_timestamp, journald, file, guard) = match output {
             LogOutput::Stdout => (
-                Some(tracing_subscriber::fmt::layer().with_timer(ZonedTime::new(timezone.clone()))),
+                Some(tracing_subscriber::fmt::layer().with_timer(ZonedTime { timezone })),
                 None,
                 None,
                 None,
@@ -586,7 +617,7 @@ impl LogConfig {
 
                 let (writer, guard) = tracing_appender::non_blocking(file_appender);
                 let layer = tracing_subscriber::fmt::layer()
-                    .with_timer(ZonedTime::new(timezone.clone()))
+                    .with_timer(ZonedTime { timezone })
                     .with_writer(writer);
 
                 (None, None, None, Some(layer), Some(guard))
@@ -626,17 +657,6 @@ impl LogConfig {
 struct ZonedTime {
     /// The time zone to write times in.
     timezone: TimeZone,
-}
-
-impl ZonedTime {
-    /// Created a new [`ZonedTime`] from an optional `timezone`.
-    ///
-    /// If a timezone is not provided, the system timezone is used if it can be determined.
-    fn new(timezone: Option<TimeZone>) -> Self {
-        Self {
-            timezone: timezone.unwrap_or_else(TimeZone::system),
-        }
-    }
 }
 
 impl FormatTime for ZonedTime {
@@ -684,9 +704,12 @@ pub(crate) struct DatabaseConfig {
     /// - `%RoamingAppData%/NovelNote/data` (Windows)
     ///
     /// If the directory does not exist, it is created.
+    ///
+    /// The database file itself is named `novelnote.sqlite3`.
     #[config(
         env = "DATABASE_DIRECTORY",
         layer_attr(arg(
+            id = "database_directory",
             long = "database-directory",
             env = "DATABASE_DIRECTORY",
             visible_aliases = ["database-dir", "db-directory", "db-dir"],
@@ -695,14 +718,30 @@ pub(crate) struct DatabaseConfig {
         ))
     )]
     pub directory: Option<PathBuf>,
+
+    /// Database backup configuration.
+    #[config(nested, layer_attr(command(flatten)))]
+    pub backup: DatabaseBackupConfig,
 }
 
 impl DatabaseConfig {
+    /// Get the set database directory or the default.
+    pub(crate) fn directory<'a>(&'a self, dirs: &'a ProjectDirs) -> &'a Path {
+        self.directory.as_deref().unwrap_or_else(|| dirs.data_dir())
+    }
+
+    /// Get the set database backup directory or the default.
+    pub(crate) fn backup_directory<'a>(&'a self, dirs: &ProjectDirs) -> Cow<'a, Path> {
+        self.backup
+            .directory
+            .as_deref()
+            .map_or_else(|| self.directory(dirs).join("backup").into(), Into::into)
+    }
+
     /// Open a SQLite database in the configured directory.
     #[instrument(name = "open_database", skip_all)]
     pub(crate) async fn open(&self, dirs: &ProjectDirs) -> Result<Database, Report> {
-        let Self { directory } = self;
-        let directory = directory.as_deref().unwrap_or_else(|| dirs.data_dir());
+        let directory = self.directory(dirs);
         {
             let span = tracing::Span::current();
             let directory = directory.to_owned();
@@ -728,6 +767,62 @@ impl DatabaseConfig {
         debug!(database_path = %path.display(), "opened database");
         Ok(database)
     }
+}
+
+/// Database backup configuration. The `[database.backup]` section in a config file.
+#[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
+#[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
+pub(crate) struct DatabaseBackupConfig {
+    /// Path to the directory where the database backups are placed.
+    ///
+    /// The default is a `backup` directory in the database directory.
+    ///
+    /// If the directory does not exist, it is created.
+    ///
+    /// The path must be valid UTF-8 because it is passed to the admin socket.
+    ///
+    /// Backups are named `novelnote_backup_<ISO-8601 date time>.sqlite3`, with the current date and
+    /// time based on the `timezone` set. For example, a backup on January 2nd, 2026 at 3:45pm would
+    /// have the filename `novelnote_backup_2026-01-02T154500.sqlite3`.
+    #[config(
+        env = "DATABASE_BACKUP_DIRECTORY",
+        layer_attr(arg(
+            id = "database_backup_directory",
+            long = "database-backup-directory",
+            env = "DATABASE_BACKUP_DIRECTORY",
+            visible_aliases = [
+                "database-backup-dir",
+                "db-backup-directory",
+                "db-backup-dir",
+                "backup-directory",
+                "backup-dir",
+            ],
+            value_name = "DB_BACKUP_DIR",
+        ))
+    )]
+    pub directory: Option<PathBuf>,
+
+    /// How many database backups to keep.
+    ///
+    /// Must be at least 1.
+    ///
+    /// Backups are only considered for deletion if the filename matches the format described above.
+    #[config(
+        env = "DATABASE_BACKUP_KEEP_LAST",
+        default = 5,
+        layer_attr(arg(
+            long = "database-backup-keep-last",
+            env = "DATABASE_BACKUP_KEEP_LAST",
+            visible_aliases = [
+                "db-backup-keep-last",
+                "database-backup-keep",
+                "db-backup-keep",
+                "keep-last",
+            ],
+            value_name = "DB_KEEP_LAST",
+        ))
+    )]
+    pub keep_last: NonZero<u8>,
 }
 
 /// HTTP server configuration. The `[http]` section in a config file.
@@ -768,5 +863,18 @@ impl HttpServerConfig {
             socket_address: SocketAddr::new(bind_address, port),
             database,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use confique::{Config as _, Layer as _};
+
+    use super::*;
+
+    /// Ensure that all config options are optional or have default values.
+    #[test]
+    fn all_config_optional() -> Result<(), confique::Error> {
+        Config::from_layer(ConfigLayer::default_values()).map(|_| ())
     }
 }

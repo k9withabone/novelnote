@@ -62,7 +62,7 @@ NovelNote is currently a work-in-progress.
 - [x] Graceful shutdown
 - [x] OpenAPI documentation
 - [ ] Database backups
-  - [ ] Manual
+  - [x] Manual
   - [ ] Scheduled
 - [ ] SSH interfaces
   - [ ] CLI
