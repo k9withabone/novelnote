@@ -1,16 +1,23 @@
 //! The [`Config`] file format and CLI args for NovelNote.
 
 use std::{
+    borrow::Cow,
     net::{IpAddr, SocketAddr},
-    path::PathBuf,
+    num::NonZero,
+    path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 use clap::{Args, ValueEnum};
-use color_eyre::eyre::{Report, WrapErr};
-use confique::{Config as _, toml::FormatOptions};
+use color_eyre::{
+    Section,
+    eyre::{Report, WrapErr, ensure},
+};
+use confique::toml::FormatOptions;
 use directories::ProjectDirs;
-use jiff::{Timestamp, Unit, fmt::serde::tz, tz::TimeZone};
+use jiff::{Span, Timestamp, Unit, fmt::serde::tz, tz::TimeZone};
+use novelnote_admin::{AdminClient, AdminServer};
 use novelnote_database::Database;
 use novelnote_server::Server;
 use serde::{
@@ -18,7 +25,7 @@ use serde::{
     de::{self, IntoDeserializer},
 };
 use tokio::task::spawn_blocking;
-use tracing::{Span, debug, info, instrument};
+use tracing::{debug, info, instrument};
 use tracing_appender::{
     non_blocking::WorkerGuard,
     rolling::{RollingFileAppender, Rotation},
@@ -32,35 +39,85 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
+use crate::BackupArgs;
+
 /// NovelNote configuration.
 ///
-/// Use with `novelnote serve --config-file <path>`.
+/// Use with `novelnote --config-file <path>`.
 ///
-/// See `novelnote serve --help` for default config file locations and additional explanations of
-/// enumerated options.
+/// See `novelnote --help` for default config file locations and `novelnote serve --help` for
+/// additional explanations of enumerated options.
 #[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
 #[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
 pub(crate) struct Config {
-    /// Logging configuration.
+    /// Timezone to use when writing timestamps.
+    ///
+    /// Used by the `stdout` and `file` log output modes and database backup filenames.
+    ///
+    /// By default, the system timezone is used if it can be determined.
+    ///
+    /// Does not affect how timestamps are stored in the database (always in UTC) or how they are
+    /// displayed to the user (local timezone).
     #[config(
-        nested,
-        layer_attr(command(flatten, next_help_heading = "Log Options"))
+        env = "TZ",
+        deserialize_with = tz::required::deserialize,
+        layer_attr(arg(
+            long,
+            env = "TZ",
+            visible_alias = "tz",
+            value_parser = timezone_value_parser,
+            allow_hyphen_values = true,
+        ))
     )]
+    pub timezone: Option<TimeZone>,
+
+    /// Admin socket configuration.
+    ///
+    /// By default, `novelnote serve` will, in addition to the HTTP server, start an admin server.
+    /// It binds to a Unix domain socket (Linux and macOS) or named pipe (Windows) that other
+    /// commands, e.g. `novelnote backup`, use to communicate with the main process.
+    #[config(nested, layer_attr(command(flatten)))]
+    pub admin: AdminConfig,
+
+    /// Logging configuration.
+    #[config(nested, layer_attr(command(flatten)))]
     pub log: LogConfig,
 
-    /// Database configuration.
-    #[config(
-        nested,
-        layer_attr(command(flatten, next_help_heading = "Database Options"))
-    )]
+    /// SQLite database configuration.
+    #[config(nested, layer_attr(command(flatten)))]
     pub database: DatabaseConfig,
 
     /// HTTP server configuration.
-    #[config(
-        nested,
-        layer_attr(command(flatten, next_help_heading = "HTTP Server Options"))
-    )]
+    #[config(nested, layer_attr(command(flatten)))]
     pub http: HttpServerConfig,
+}
+
+/// Parse [`TimeZone`] from a string.
+///
+/// Used for parsing the `--timezone` CLI arg in [`Config`].
+pub(crate) fn timezone_value_parser(value: &str) -> Result<TimeZone, de::value::Error> {
+    tz::required::deserialize(value.into_deserializer())
+}
+
+/// Partial NovelNote configuration.
+type ConfigLayer = <Config as confique::Config>::Layer;
+
+impl From<BackupArgs> for ConfigLayer {
+    fn from(
+        BackupArgs {
+            timezone,
+            admin,
+            database,
+        }: BackupArgs,
+    ) -> Self {
+        Self {
+            timezone,
+            admin,
+            log: confique::Layer::empty(),
+            database,
+            http: confique::Layer::empty(),
+        }
+    }
 }
 
 impl Config {
@@ -78,29 +135,337 @@ impl Config {
         config_file: Option<PathBuf>,
         dirs: &ProjectDirs,
     ) -> Result<Self, confique::Error> {
-        // Environment variable config is handled by clap.
-        let mut builder = Self::builder().preloaded(cli_args);
+        load_config(cli_args, config_file, dirs)
+    }
+}
 
-        if let Some(config_file) = config_file {
-            builder = builder.file(config_file);
-        } else {
-            builder = builder
-                .file("novelnote.toml")
-                .file(dirs.config_dir().join("novelnote.toml"));
+/// Load config from CLI args and config files.
+///
+/// If a config file path is provided, only that file is read. Otherwise, several OS standard
+/// locations and the current working directory are checked for config files.
+fn load_config<T: confique::Config>(
+    cli_args: T::Layer,
+    config_file: Option<PathBuf>,
+    dirs: &ProjectDirs,
+) -> Result<T, confique::Error> {
+    // Environment variable config is handled by clap.
+    let mut builder = T::builder().preloaded(cli_args);
 
-            #[cfg(unix)]
-            {
-                builder = builder.file("/etc/novelnote/novelnote.toml");
-            }
+    if let Some(config_file) = config_file {
+        builder = builder.file(config_file);
+    } else {
+        builder = builder
+            .file("novelnote.toml")
+            .file(dirs.config_dir().join("novelnote.toml"));
+
+        #[cfg(unix)]
+        {
+            builder = builder.file("/etc/novelnote/novelnote.toml");
         }
+    }
 
-        builder.load()
+    builder.load()
+}
+
+/// Admin socket configuration. The `[admin]` section in a config file.
+#[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
+#[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
+#[config(layer_attr(command(next_help_heading = "Admin Socket Options")))]
+pub(crate) struct AdminConfig {
+    /// Control whether the admin socket is enabled (default).
+    ///
+    /// Disabling the admin socket is not recommended as it is required for some commands, e.g.
+    /// `novelnote backup`, to function.
+    #[config(
+        env = "ADMIN_SOCKET_ENABLED",
+        default = true,
+        layer_attr(arg(long = "enable-admin-socket", env = "ADMIN_SOCKET_ENABLED"))
+    )]
+    pub enabled: bool,
+
+    /// Admin socket path.
+    ///
+    /// On Linux and macOS, this is the path of the Unix domain socket. If the directory for the
+    /// socket does not exist, it is created. For Linux, the default is
+    /// `${XDG_RUNTIME_DIR}/novelnote/novelnote_admin.sock`. For macOS the default is
+    /// `$HOME/Library/Application Support/NovelNote/novelnote_admin.sock`.
+    ///
+    /// On Windows, this is the named pipe namespace. It must start with `\\.\pipe\` and the default
+    /// is `\\.\pipe\NovelNote_Admin`.
+    #[config(
+        env = "ADMIN_SOCKET_PATH",
+        layer_attr(arg(
+            long = "admin-socket-path",
+            env = "ADMIN_SOCKET_PATH",
+            visible_aliases = ["admin-path", "socket-path"],
+            value_name = "ADMIN_SOCKET_PATH",
+        ))
+    )]
+    pub socket_path: Option<AdminSocketPath>,
+
+    /// How long each connection will attempt to read or write before timing out.
+    ///
+    /// See the [`jiff` "friendly" format] for examples of how this may be specified.
+    ///
+    /// The default is 5 seconds. It must be less than 1 minute.
+    ///
+    /// [`jiff` "friendly" format]: https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html
+    #[config(
+        env = "ADMIN_SOCKET_TIMEOUT",
+        default = "5 seconds",
+        layer_attr(arg(
+            long = "admin-socket-timeout",
+            env = "ADMIN_SOCKET_TIMEOUT",
+            visible_alias = "admin-timeout",
+        ))
+    )]
+    pub timeout: Timeout<60>,
+}
+
+/// [`AdminConfig`] nested in the `[admin]` table.
+///
+/// Used for deserializing a part of a [`Config`] file.
+#[derive(confique::Config)]
+struct NestedAdminConfig {
+    /// Admin socket configuration.
+    #[config(nested)]
+    admin: AdminConfig,
+}
+
+/// Partial configuration for [`NestedAdminConfig`].
+type NestedAdminConfigLayer = <NestedAdminConfig as confique::Config>::Layer;
+
+impl AdminConfig {
+    /// Load admin config from CLI args and config files.
+    ///
+    /// If a config file path is provided, only that file is read. Otherwise, several OS standard
+    /// locations and the current working directory are checked for config files.
+    pub(crate) fn load(
+        cli_args: <Self as confique::Config>::Layer,
+        config_file: Option<PathBuf>,
+        dirs: &ProjectDirs,
+    ) -> Result<Self, confique::Error> {
+        let cli_args = NestedAdminConfigLayer { admin: cli_args };
+        let NestedAdminConfig { admin } = load_config(cli_args, config_file, dirs)?;
+        Ok(admin)
+    }
+
+    /// Bind an [`AdminServer`] using the configured values.
+    ///
+    /// Returns [`None`] if the admin socket is disabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there is an error binding the admin server.
+    pub(crate) fn into_server(
+        self,
+        dirs: &ProjectDirs,
+        database: Database,
+    ) -> Result<Option<AdminServer>, Report> {
+        let Self {
+            enabled,
+            socket_path,
+            timeout,
+        } = self;
+
+        if enabled {
+            let socket_path = socket_path.unwrap_or_else(|| AdminSocketPath::default(dirs));
+            socket_path.create_dir()?;
+
+            AdminServer::bind(socket_path.as_ref(), timeout.into(), database)
+                .map(Some)
+                .wrap_err("error binding admin server")
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Connect an [`AdminClient`] to the admin socket using the configured values.
+    ///
+    /// Returns [`None`] if the admin socket is disabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a connection to the admin socket cannot be established.
+    pub(crate) async fn into_client(
+        self,
+        dirs: &ProjectDirs,
+    ) -> Result<Option<AdminClient>, Report> {
+        let Self {
+            enabled,
+            socket_path,
+            timeout,
+        } = self;
+
+        if enabled {
+            let socket_path = socket_path.unwrap_or_else(|| AdminSocketPath::default(dirs));
+
+            AdminClient::connect(socket_path.as_ref(), timeout.into())
+                .await
+                .map(Some)
+                .wrap_err("error connecting to admin socket")
+                .suggestion("ensure that the NovelNote server is running")
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+/// Admin socket connection path.
+///
+/// Must start with `\\.\pipe\` on Windows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AdminSocketPath(Box<Path>);
+
+impl AdminSocketPath {
+    /// Required prefix for named pipe namespace on Windows.
+    #[cfg(windows)]
+    const PIPE_PREFIX: &str = r"\\.\pipe\";
+
+    /// Default path for the admin socket.
+    fn default(dirs: &ProjectDirs) -> Self {
+        #[cfg(windows)]
+        let path = {
+            let _ = dirs;
+            Path::new(Self::PIPE_PREFIX).join("NovelNote_Admin")
+        };
+
+        #[cfg(not(windows))]
+        let path = dirs
+            .runtime_dir()
+            .or_else(|| {
+                dirs.state_dir()
+                    .inspect(|_| tracing::warn!("`XDG_RUNTIME_DIR` not set, using state directory"))
+            })
+            .unwrap_or_else(|| dirs.data_local_dir())
+            .join("novelnote_admin.sock");
+
+        Self(path.into_boxed_path())
+    }
+
+    /// Create directory the socket path is in if it does not exist.
+    fn create_dir(&self) -> Result<(), Report> {
+        if cfg!(unix)
+            && let Some(path) = self.0.parent()
+            && !path.is_dir()
+        {
+            std::fs::create_dir_all(path).wrap_err_with(|| {
+                format!("error creating socket path directory `{}`", path.display())
+            })?;
+            info!(socket_path_directory = %path.display(), "created socket path directory");
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<Box<Path>> for AdminSocketPath {
+    type Error = Report;
+
+    fn try_from(value: Box<Path>) -> Result<Self, Self::Error> {
+        #[cfg(windows)]
+        ensure!(
+            value.starts_with(Self::PIPE_PREFIX),
+            "admin socket path must start with `{}` on Windows",
+            Self::PIPE_PREFIX
+        );
+
+        Ok(Self(value))
+    }
+}
+
+impl TryFrom<PathBuf> for AdminSocketPath {
+    type Error = Report;
+
+    fn try_from(value: PathBuf) -> Result<Self, Self::Error> {
+        value.into_boxed_path().try_into()
+    }
+}
+
+impl FromStr for AdminSocketPath {
+    type Err = Report;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        PathBuf::from(s).try_into()
+    }
+}
+
+impl<'de> Deserialize<'de> for AdminSocketPath {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        PathBuf::deserialize(deserializer)?
+            .try_into()
+            .map_err(de::Error::custom)
+    }
+}
+
+impl AsRef<Path> for AdminSocketPath {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// How long a connection should be open before timing out.
+///
+/// `S` is max number of seconds a timeout can be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Timeout<const S: u64>(Duration);
+
+impl<const S: u64> Timeout<S> {
+    /// Create a new timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `duration` is longer than `S` seconds.
+    pub(crate) fn new(duration: Duration) -> Result<Self, Report> {
+        ensure!(
+            duration <= Duration::from_secs(S),
+            "timeout must be less than {S} seconds long"
+        );
+        Ok(Self(duration))
+    }
+}
+
+impl<const S: u64> TryFrom<Duration> for Timeout<S> {
+    type Error = Report;
+
+    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl<const S: u64> TryFrom<Span> for Timeout<S> {
+    type Error = Report;
+
+    fn try_from(value: Span) -> Result<Self, Self::Error> {
+        Duration::try_from(value)?.try_into()
+    }
+}
+
+impl<'de, const S: u64> Deserialize<'de> for Timeout<S> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Span::deserialize(deserializer)?
+            .try_into()
+            .map_err(de::Error::custom)
+    }
+}
+
+impl<const S: u64> FromStr for Timeout<S> {
+    type Err = Report;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Span::from_str(s)?.try_into()
+    }
+}
+
+impl<const S: u64> From<Timeout<S>> for Duration {
+    fn from(value: Timeout<S>) -> Self {
+        value.0
     }
 }
 
 /// Logging configuration. The `[log]` section in a config file.
 #[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
 #[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
+#[config(layer_attr(command(next_help_heading = "Log Options")))]
 pub(crate) struct LogConfig {
     /// Where logs should be written to.
     ///
@@ -111,24 +476,6 @@ pub(crate) struct LogConfig {
         layer_attr(arg(short = 'o', long = "log-output", env = "LOG_OUTPUT", value_enum))
     )]
     pub output: LogOutput,
-
-    /// Timezone to use when writing timestamps in the log output.
-    ///
-    /// Used by the `stdout` and `file` log output mode.
-    ///
-    /// If not set, the system timezone is used if it can be determined.
-    #[config(
-        env = "TZ",
-        deserialize_with = tz::required::deserialize,
-        layer_attr(arg(
-            long,
-            env = "TZ",
-            visible_alias = "tz",
-            value_parser = timezone_value_parser,
-            allow_hyphen_values = true,
-        ))
-    )]
-    pub timezone: Option<TimeZone>,
 
     /// Filter what is logged.
     ///
@@ -183,13 +530,6 @@ pub(crate) struct LogConfig {
     pub max_log_files: usize,
 }
 
-/// Parse [`TimeZone`] from a string.
-///
-/// Used for parsing the `--timezone` CLI arg in [`LogConfig`].
-fn timezone_value_parser(value: &str) -> Result<TimeZone, de::value::Error> {
-    tz::required::deserialize(value.into_deserializer())
-}
-
 /// A [`Directive`] wrapper implementing [`Deserialize`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LogDirective(Directive);
@@ -219,10 +559,13 @@ impl LogConfig {
     /// # Errors
     ///
     /// Returns an error if a global subscriber was already installed.
-    pub(crate) fn init_logging(&self, dirs: &ProjectDirs) -> Result<Option<WorkerGuard>, Report> {
+    pub(crate) fn init_logging(
+        &self,
+        timezone: TimeZone,
+        dirs: &ProjectDirs,
+    ) -> Result<Option<WorkerGuard>, Report> {
         let Self {
             output,
-            timezone,
             directives,
             file_directory,
             max_log_files,
@@ -231,7 +574,7 @@ impl LogConfig {
         let mut created_log_dir = None;
         let (stdout, stdout_no_timestamp, journald, file, guard) = match output {
             LogOutput::Stdout => (
-                Some(tracing_subscriber::fmt::layer().with_timer(ZonedTime::new(timezone.clone()))),
+                Some(tracing_subscriber::fmt::layer().with_timer(ZonedTime { timezone })),
                 None,
                 None,
                 None,
@@ -274,7 +617,7 @@ impl LogConfig {
 
                 let (writer, guard) = tracing_appender::non_blocking(file_appender);
                 let layer = tracing_subscriber::fmt::layer()
-                    .with_timer(ZonedTime::new(timezone.clone()))
+                    .with_timer(ZonedTime { timezone })
                     .with_writer(writer);
 
                 (None, None, None, Some(layer), Some(guard))
@@ -316,17 +659,6 @@ struct ZonedTime {
     timezone: TimeZone,
 }
 
-impl ZonedTime {
-    /// Created a new [`ZonedTime`] from an optional `timezone`.
-    ///
-    /// If a timezone is not provided, the system timezone is used if it can be determined.
-    fn new(timezone: Option<TimeZone>) -> Self {
-        Self {
-            timezone: timezone.unwrap_or_else(TimeZone::system),
-        }
-    }
-}
-
 impl FormatTime for ZonedTime {
     fn format_time(&self, w: &mut Writer) -> std::fmt::Result {
         let now = Timestamp::now()
@@ -361,6 +693,7 @@ pub(crate) enum LogOutput {
 /// SQLite database configuration. The `[database]` section in a config file.
 #[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
 #[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
+#[config(layer_attr(command(next_help_heading = "Database Options")))]
 pub(crate) struct DatabaseConfig {
     /// Path to the directory where the SQLite database file is placed.
     ///
@@ -371,9 +704,12 @@ pub(crate) struct DatabaseConfig {
     /// - `%RoamingAppData%/NovelNote/data` (Windows)
     ///
     /// If the directory does not exist, it is created.
+    ///
+    /// The database file itself is named `novelnote.sqlite3`.
     #[config(
         env = "DATABASE_DIRECTORY",
         layer_attr(arg(
+            id = "database_directory",
             long = "database-directory",
             env = "DATABASE_DIRECTORY",
             visible_aliases = ["database-dir", "db-directory", "db-dir"],
@@ -382,16 +718,32 @@ pub(crate) struct DatabaseConfig {
         ))
     )]
     pub directory: Option<PathBuf>,
+
+    /// Database backup configuration.
+    #[config(nested, layer_attr(command(flatten)))]
+    pub backup: DatabaseBackupConfig,
 }
 
 impl DatabaseConfig {
+    /// Get the set database directory or the default.
+    pub(crate) fn directory<'a>(&'a self, dirs: &'a ProjectDirs) -> &'a Path {
+        self.directory.as_deref().unwrap_or_else(|| dirs.data_dir())
+    }
+
+    /// Get the set database backup directory or the default.
+    pub(crate) fn backup_directory<'a>(&'a self, dirs: &ProjectDirs) -> Cow<'a, Path> {
+        self.backup
+            .directory
+            .as_deref()
+            .map_or_else(|| self.directory(dirs).join("backup").into(), Into::into)
+    }
+
     /// Open a SQLite database in the configured directory.
     #[instrument(name = "open_database", skip_all)]
     pub(crate) async fn open(&self, dirs: &ProjectDirs) -> Result<Database, Report> {
-        let Self { directory } = self;
-        let directory = directory.as_deref().unwrap_or_else(|| dirs.data_dir());
+        let directory = self.directory(dirs);
         {
-            let span = Span::current();
+            let span = tracing::Span::current();
             let directory = directory.to_owned();
             spawn_blocking(move || {
                 let _entered = span.entered();
@@ -417,9 +769,66 @@ impl DatabaseConfig {
     }
 }
 
+/// Database backup configuration. The `[database.backup]` section in a config file.
+#[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
+#[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
+pub(crate) struct DatabaseBackupConfig {
+    /// Path to the directory where the database backups are placed.
+    ///
+    /// The default is a `backup` directory in the database directory.
+    ///
+    /// If the directory does not exist, it is created.
+    ///
+    /// The path must be valid UTF-8 because it is passed to the admin socket.
+    ///
+    /// Backups are named `novelnote_backup_<ISO-8601 date time>.sqlite3`, with the current date and
+    /// time based on the `timezone` set. For example, a backup on January 2nd, 2026 at 3:45pm would
+    /// have the filename `novelnote_backup_2026-01-02T154500.sqlite3`.
+    #[config(
+        env = "DATABASE_BACKUP_DIRECTORY",
+        layer_attr(arg(
+            id = "database_backup_directory",
+            long = "database-backup-directory",
+            env = "DATABASE_BACKUP_DIRECTORY",
+            visible_aliases = [
+                "database-backup-dir",
+                "db-backup-directory",
+                "db-backup-dir",
+                "backup-directory",
+                "backup-dir",
+            ],
+            value_name = "DB_BACKUP_DIR",
+        ))
+    )]
+    pub directory: Option<PathBuf>,
+
+    /// How many database backups to keep.
+    ///
+    /// Must be at least 1.
+    ///
+    /// Backups are only considered for deletion if the filename matches the format described above.
+    #[config(
+        env = "DATABASE_BACKUP_KEEP_LAST",
+        default = 5,
+        layer_attr(arg(
+            long = "database-backup-keep-last",
+            env = "DATABASE_BACKUP_KEEP_LAST",
+            visible_aliases = [
+                "db-backup-keep-last",
+                "database-backup-keep",
+                "db-backup-keep",
+                "keep-last",
+            ],
+            value_name = "DB_KEEP_LAST",
+        ))
+    )]
+    pub keep_last: NonZero<u8>,
+}
+
 /// HTTP server configuration. The `[http]` section in a config file.
 #[derive(confique::Config, Debug, Clone, Copy, PartialEq, Eq)]
 #[config(layer_attr(derive(Args, Debug, Clone, Copy, PartialEq, Eq)))]
+#[config(layer_attr(command(next_help_heading = "HTTP Server Options")))]
 pub(crate) struct HttpServerConfig {
     /// IP address the HTTP server should bind to.
     ///
@@ -454,5 +863,18 @@ impl HttpServerConfig {
             socket_address: SocketAddr::new(bind_address, port),
             database,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use confique::{Config as _, Layer as _};
+
+    use super::*;
+
+    /// Ensure that all config options are optional or have default values.
+    #[test]
+    fn all_config_optional() -> Result<(), confique::Error> {
+        Config::from_layer(ConfigLayer::default_values()).map(|_| ())
     }
 }

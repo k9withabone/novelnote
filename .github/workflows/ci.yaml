@@ -51,7 +51,23 @@ jobs:
         run: cargo build --verbose --workspace
 
       - name: Run Tests
+        env:
+          RUST_LOG: trace
         run: cargo test --verbose --workspace
+
+  test-admin-socket-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Admin Socket Tests
+        env:
+          RUST_LOG: trace
+        run: cargo test --verbose --package novelnote_admin
 
   build:
     strategy:
@@ -141,7 +157,7 @@ jobs:
       - name: Build docs
         env:
           RUSTDOCFLAGS: "-Dwarnings"
-        run: cargo doc --verbose --workspace --document-private-items
+        run: cargo doc --verbose --workspace --document-private-items --no-deps
 
   # Builds docs as docs.rs does
   docs-rs:
@@ -156,11 +172,14 @@ jobs:
       - name: Install cargo-docs-rs
         uses: dtolnay/install@cargo-docs-rs
 
-      - name: Build novelnote_server docs
-        run: cargo docs-rs --verbose --package novelnote_server
+      - name: Build novelnote_admin docs
+        run: cargo docs-rs --verbose --package novelnote_admin
 
       - name: Build novelnote_database docs
         run: cargo docs-rs --verbose --package novelnote_database
+
+      - name: Build novelnote_server docs
+        run: cargo docs-rs --verbose --package novelnote_server
 
   spellcheck:
     runs-on: ubuntu-latest
