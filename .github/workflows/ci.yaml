@@ -21,8 +21,17 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Install leptosfmt
+        uses: taiki-e/install-action@v2
+        with:
+          tool: leptosfmt
+
       - name: Rust Format Check
         run: cargo fmt --verbose --check --all
+
+      # Checks formatting of `leptos::view!{}` macros in `novelnote_web`.
+      - name: Leptos Format Check
+        run: leptosfmt --check web/
 
   clippy:
     runs-on: ubuntu-latest
