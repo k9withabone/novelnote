@@ -1,5 +1,5 @@
 [workspace]
-members = ["admin", "database", "server"]
+members = ["admin", "database", "server", "web"]
 resolver = "3"
 
 [workspace.package]
