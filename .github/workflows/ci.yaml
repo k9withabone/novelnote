@@ -94,6 +94,25 @@ jobs:
       - name: Build
         run: cargo build --verbose --package novelnote
 
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      - name: Build Frontend
+        run: trunk build --verbose --config web/
+
   build-container:
     needs: build
     runs-on: ubuntu-latest
