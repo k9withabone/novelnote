@@ -18,7 +18,7 @@ axum = "0.8.8"
 novelnote_database.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }
-tower-http = { version = "0.6.8", features = ["timeout", "trace"] }
+tower-http = { version = "0.6.8", features = ["fs", "timeout", "trace"] }
 tracing.workspace = true
 tracing-error.workspace = true
 utoipa = { version = "5.4.0", features = ["axum_extras"] }
