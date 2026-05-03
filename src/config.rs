@@ -850,7 +850,7 @@ pub(crate) struct HttpServerConfig {
     #[config(
         env = "HTTP_PORT",
         default = 8080,
-        layer_attr(arg(short, long, visible_alias = "http-port"))
+        layer_attr(arg(short, long, env = "HTTP_PORT", visible_alias = "http-port"))
     )]
     pub port: u16,
 
