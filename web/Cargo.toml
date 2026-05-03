@@ -1,0 +1,20 @@
+[package]
+name = "novelnote_web"
+version = "0.1.0-alpha.1"
+description = "Web frontend for NovelNote, a self-hosted book tracker"
+categories = ["wasm", "web-programming"]
+authors.workspace = true
+edition.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+
+[package.metadata.trunk.build]
+dist = "../target/dist"
+
+[lints]
+workspace = true
+
+[dependencies]
+leptos = { version = "0.8.19", features = ["csr"] }

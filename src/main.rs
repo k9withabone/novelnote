@@ -344,11 +344,11 @@ async fn run_servers(
         .open(dirs)
         .await
         .wrap_err("error opening database")?;
+    let http_server = http.into_server(database.clone()).await;
 
     let cancellation_token = CancellationToken::new();
     tokio::spawn(shutdown_signal(cancellation_token.clone()));
 
-    let http_server = http.into_server(database.clone());
     let child_token = cancellation_token.child_token();
     let http_server = async {
         info!("starting HTTP server");
