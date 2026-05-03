@@ -1,6 +1,6 @@
 [package]
 name = "novelnote_server"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 description = "Server library for NovelNote, a self-hosted book tracker"
 categories = ["web-programming", "web-programming::http-server"]
 authors.workspace = true
