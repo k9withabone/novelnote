@@ -63,7 +63,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY admin/Cargo.toml ./admin/
 COPY database/Cargo.toml ./database/
 COPY server/Cargo.toml ./server/
-COPY web/Cargo.toml web/index.html ./web/
+COPY web/Cargo.toml web/index.html web/index.css ./web/
 COPY src ./src
 COPY admin/src ./admin/src
 COPY database/src ./database/src

@@ -13,6 +13,9 @@ keywords.workspace = true
 [package.metadata.trunk.build]
 dist = "../target/dist"
 
+[package.metadata.trunk.tools]
+tailwindcss = "4.3.3"
+
 [lints]
 workspace = true
 

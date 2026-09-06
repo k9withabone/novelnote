@@ -31,7 +31,7 @@ jobs:
 
       # Checks formatting of `leptos::view!{}` macros in `novelnote_web`.
       - name: Leptos Format Check
-        run: leptosfmt --check web/
+        run: leptosfmt --check --experimental-tailwind web/
 
   clippy:
     runs-on: ubuntu-latest
