@@ -1,8 +1,9 @@
 # Clippy configuration
 
+absolute-paths-allowed-crates = ["leptos"]
 absolute-paths-max-segments = 3
-# `clap` dependency `terminal_size` uses an older version of `windows-sys`.
 allowed-duplicate-crates = [
+  # `clap` dependency `terminal_size` uses an older version of `windows-sys`.
   "windows-sys",
   "windows-targets",
   "windows_aarch64_gnullvm",
@@ -13,6 +14,15 @@ allowed-duplicate-crates = [
   "windows_x86_64_gnu",
   "windows_x86_64_gnullvm",
   "windows_x86_64_msvc",
+
+  # `leptos` dependencies
+  "foldhash",
+  "hashbrown",
+  "convert_case",
+  "thiserror",
+  "thiserror-impl",
+  "getrandom",
+  "winnow",
 ]
 allowed-idents-below-min-chars = ["s", "f", "v", ".."]
 doc-valid-idents = ["NovelNote", "SQLite", ".."]

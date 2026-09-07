@@ -1,0 +1,5 @@
+# rustfmt.toml
+# rustfmt configuration
+
+# Needed for leptosfmt.
+edition = "2024"

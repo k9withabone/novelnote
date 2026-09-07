@@ -2,13 +2,13 @@
 
 mod api;
 
-use std::{io, net::SocketAddr, time::Duration};
+use std::{io, net::SocketAddr, path::PathBuf, time::Duration};
 
 use axum::{Router, http::StatusCode};
 use novelnote_database::Database;
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
+use tower_http::{services::ServeDir, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{info, instrument};
 use tracing_error::TracedError;
 
@@ -19,6 +19,11 @@ use tracing_error::TracedError;
 pub struct Server {
     /// Socket address the server binds to.
     pub socket_address: SocketAddr,
+
+    /// Directory to serve from the root.
+    ///
+    /// Should contain the frontend and any other assets.
+    pub asset_directory: PathBuf,
 
     /// Database connection handle.
     pub database: Database,
@@ -32,13 +37,21 @@ impl Server {
     /// # Errors
     ///
     /// Returns an error if binding to the given [`SocketAddr`] fails.
-    #[instrument(level = "trace", skip_all, fields(socket_address = %self.socket_address))]
+    #[instrument(
+        level = "trace",
+        skip_all,
+        fields(
+            socket_address = %self.socket_address,
+            asset_directory = %self.asset_directory.display(),
+        ),
+    )]
     pub async fn run<F>(self, shutdown_signal: F) -> Result<(), TracedError<ServerError>>
     where
         F: Future<Output = ()> + Send + 'static,
     {
         let Self {
             socket_address,
+            asset_directory,
             database,
         } = self;
 
@@ -52,6 +65,7 @@ impl Server {
                     Duration::from_secs(15),
                 ),
             ))
+            .fallback_service(ServeDir::new(asset_directory))
             .with_state(database);
 
         let listener =

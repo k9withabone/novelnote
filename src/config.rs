@@ -2,6 +2,7 @@
 
 use std::{
     borrow::Cow,
+    fs::Metadata,
     net::{IpAddr, SocketAddr},
     num::NonZero,
     path::{Path, PathBuf},
@@ -826,8 +827,8 @@ pub(crate) struct DatabaseBackupConfig {
 }
 
 /// HTTP server configuration. The `[http]` section in a config file.
-#[derive(confique::Config, Debug, Clone, Copy, PartialEq, Eq)]
-#[config(layer_attr(derive(Args, Debug, Clone, Copy, PartialEq, Eq)))]
+#[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
+#[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
 #[config(layer_attr(command(next_help_heading = "HTTP Server Options")))]
 pub(crate) struct HttpServerConfig {
     /// IP address the HTTP server should bind to.
@@ -849,21 +850,70 @@ pub(crate) struct HttpServerConfig {
     #[config(
         env = "HTTP_PORT",
         default = 8080,
-        layer_attr(arg(short, long, visible_alias = "http-port"))
+        layer_attr(arg(short, long, env = "HTTP_PORT", visible_alias = "http-port"))
     )]
     pub port: u16,
+
+    /// Path to the directory containing NovelNote's frontend and other assets.
+    ///
+    /// Defaults to `/usr/share/novelnote/dist` or `/usr/local/share/novelnote/dist` on Linux and
+    /// macOS if they exist, otherwise the default is `dist` in the current working directory.
+    #[config(
+        env = "ASSET_DIRECTORY",
+        layer_attr(arg(
+            long,
+            env = "ASSET_DIRECTORY",
+            visible_aliases = ["asset-dir", "assets"],
+            value_name = "ASSET_DIR",
+        ))
+    )]
+    pub asset_directory: Option<PathBuf>,
 }
 
 impl HttpServerConfig {
     /// Create [`Server`] from config.
-    pub(crate) const fn into_server(self, database: Database) -> Server {
-        let Self { bind_address, port } = self;
+    pub(crate) async fn into_server(self, database: Database) -> Server {
+        let Self {
+            bind_address,
+            port,
+            asset_directory,
+        } = self;
 
         Server {
             socket_address: SocketAddr::new(bind_address, port),
+            asset_directory: if let Some(asset_directory) = asset_directory {
+                asset_directory
+            } else {
+                default_asset_directory().await
+            },
             database,
         }
     }
+}
+
+/// Get the default asset directory. On Unix, it is `/usr/share/novelnote/dist` or
+/// `/usr/local/share/novelnote/dist` if they exist. Otherwise it is `dist`.
+#[cfg_attr(not(unix), expect(clippy::unused_async, reason = "cfg"))]
+async fn default_asset_directory() -> PathBuf {
+    #[cfg(unix)]
+    {
+        let dirs = [
+            "/usr/share/novelnote/dist",
+            "/usr/local/share/novelnote/dist",
+        ];
+
+        for dir in dirs {
+            if tokio::fs::metadata(dir)
+                .await
+                .as_ref()
+                .is_ok_and(Metadata::is_dir)
+            {
+                return PathBuf::from(dir);
+            }
+        }
+    }
+
+    PathBuf::from("dist")
 }
 
 #[cfg(test)]

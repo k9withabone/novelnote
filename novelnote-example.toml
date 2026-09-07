@@ -172,3 +172,11 @@
 #
 # Default value: 8080
 #port = 8080
+
+# Path to the directory containing NovelNote's frontend and other assets.
+#
+# Defaults to `/usr/share/novelnote/dist` or `/usr/local/share/novelnote/dist` on Linux and
+# macOS if they exist, otherwise the default is `dist` in the current working directory.
+#
+# Can also be specified via environment variable `ASSET_DIRECTORY`.
+#asset_directory =
