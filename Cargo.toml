@@ -123,7 +123,7 @@ verbose_file_reads = "warn"
 [workspace.dependencies]
 jiff = { version = "0.2.22", features = ["logging", "serde"] }
 novelnote_admin = { version = "0.1.0-alpha.1", path = "admin" }
-novelnote_database = { version = "0.1.0-alpha.1", path = "database" }
+novelnote_database = { version = "0.1.0-alpha.2", path = "database" }
 novelnote_server = { version = "0.1.0-alpha.4", path = "server" }
 serde = { version = "1.0.228", features = ["derive"] }
 tempfile = "3.27.0"
