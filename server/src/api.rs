@@ -1,7 +1,5 @@
 //! API routes nested under `/api`.
 
-#![expect(clippy::needless_for_each, reason = "`OpenApi` derive")]
-
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use novelnote_database::Database;
 use tracing::{error, instrument};
