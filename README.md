@@ -9,13 +9,17 @@ NovelNote is currently a work-in-progress.
 ## Planned Features
 
 - [ ] Multi user
-  - [ ] OIDC login
   - [ ] Password login
     - [ ] Two-factor via TOTP
-    - [ ] Password reset via CLI
+    - [ ] Password reset via CLI or email
+  - [ ] Passkey login
+  - [ ] OIDC login
+  - [ ] SSH login
+    - [ ] SSH key management
   - [ ] Display name
-  - [ ] Gravatar avatars
-  - [ ] Public SSH keys
+  - [ ] Email for password resets and notifications
+    - [ ] Email verification
+  - [ ] Avatar
 - [ ] Libraries
   - Books are grouped into libraries.
   - A library is owned by a user and other users can be added to it.
