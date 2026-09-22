@@ -18,6 +18,6 @@ allowed-duplicate-crates = [
   "getrandom",
   "winnow",
 ]
-allowed-idents-below-min-chars = ["s", "f", "v", ".."]
+allowed-idents-below-min-chars = ["s", "f", "v", "M", ".."]
 doc-valid-idents = ["NovelNote", "SQLite", ".."]
 semicolon-outside-block-ignore-multiline = true
