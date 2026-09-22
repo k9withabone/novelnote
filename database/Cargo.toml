@@ -15,6 +15,7 @@ workspace = true
 
 [dependencies]
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+rusqlite_migration = "~2.6.0"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true

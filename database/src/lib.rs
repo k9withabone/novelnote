@@ -8,6 +8,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use rusqlite_migration::{M, Migrations};
 use thiserror::Error;
 use tokio::{
     sync::{
@@ -18,6 +19,13 @@ use tokio::{
 };
 use tracing::{debug, instrument, trace, trace_span};
 use tracing_error::SpanTrace;
+
+/// Slice of database schema migrations.
+const MIGRATIONS_SLICE: &[M] = &[M::up(include_str!("migrations/users.sql"))
+    .down("DROP TRIGGER user_email_verified; DROP TABLE users;")];
+
+/// Database schema migrations.
+const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATIONS_SLICE);
 
 /// Handle to NovelNote's database connection.
 ///
@@ -214,8 +222,36 @@ impl DatabaseError {
 
 /// Error returned when initializing the database fails.
 #[derive(Error, Debug)]
-#[error("error setting pragma options")]
-pub struct InitError(#[from] pub DatabaseError);
+pub enum InitError {
+    /// Error setting PRAGMA options.
+    #[error("error setting pragma options")]
+    Pragma(#[from] DatabaseError),
+
+    /// Error running database schema migrations.
+    #[error("error running schema migrations")]
+    Migrations(#[from] MigrationsError),
+}
+
+/// Error returned when running the database schema migrations fails.
+#[derive(Error, Debug)]
+#[error("SQLite migrations error")]
+pub struct MigrationsError {
+    /// Source of the error.
+    source: Box<rusqlite_migration::Error>,
+
+    /// Tracing context.
+    context: SpanTrace,
+}
+
+impl MigrationsError {
+    /// Create a new [`MigrationsError`], capturing the current span trace.
+    fn new(source: rusqlite_migration::Error) -> Self {
+        Self {
+            source: Box::new(source),
+            context: SpanTrace::capture(),
+        }
+    }
+}
 
 /// Error returned when executing a command on the [`Database`] connection.
 #[derive(Error, Debug)]
@@ -326,8 +362,8 @@ impl Connection {
     /// Returns an error if there was a problem opening the database or initializing it.
     async fn open(path: impl AsRef<Path> + Send + 'static) -> Result<Self, OpenError> {
         let connection = spawn_blocking(|| {
-            let connection = rusqlite::Connection::open(path).map_err(DatabaseError::new)?;
-            init_db(&connection)?;
+            let mut connection = rusqlite::Connection::open(path).map_err(DatabaseError::new)?;
+            init_db(&mut connection)?;
             Ok(connection)
         })
         .await
@@ -344,8 +380,9 @@ impl Connection {
     /// Returns an error if there was a problem opening the database or initializing it.
     async fn open_in_memory() -> Result<Self, OpenError> {
         let connection = spawn_blocking(|| {
-            let connection = rusqlite::Connection::open_in_memory().map_err(DatabaseError::new)?;
-            init_db(&connection)?;
+            let mut connection =
+                rusqlite::Connection::open_in_memory().map_err(DatabaseError::new)?;
+            init_db(&mut connection)?;
             Ok(connection)
         })
         .await
@@ -397,13 +434,13 @@ impl Connection {
     }
 }
 
-/// Initialize the database, setting PRAGMAs.
+/// Initialize the database, setting PRAGMAs and running migrations.
 ///
 /// # Errors
 ///
-/// Returns an error if a PRAGMA setting cannot be set.
+/// Returns an error if a PRAGMA setting cannot be set or a migration fails.
 #[instrument(level = "debug", skip(connection))]
-fn init_db(connection: &rusqlite::Connection) -> Result<(), InitError> {
+fn init_db(connection: &mut rusqlite::Connection) -> Result<(), InitError> {
     connection
         .pragma_update(None, "journal_mode", "WAL")
         .map_err(DatabaseError::new)?;
@@ -414,7 +451,9 @@ fn init_db(connection: &rusqlite::Connection) -> Result<(), InitError> {
         .pragma_update(None, "foreign_keys", "OFF")
         .map_err(DatabaseError::new)?;
 
-    // TODO: migrations
+    MIGRATIONS
+        .to_latest(connection)
+        .map_err(MigrationsError::new)?;
 
     connection
         .execute("PRAGMA foreign_key_check", ())
@@ -473,6 +512,24 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::*;
+
+    /// Test all up and down migrations.
+    #[test]
+    fn migrations() -> Result<(), Box<dyn Error>> {
+        let mut connection = rusqlite::Connection::open_in_memory()?;
+
+        MIGRATIONS.to_latest(&mut connection)?;
+        MIGRATIONS.to_version(&mut connection, 0)?;
+
+        // Check that the database has no user defined tables.
+        let tables = connection
+            .prepare("SELECT type, name FROM sqlite_schema")?
+            .query_map((), |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<(String, String)>, _>>()?;
+        assert_eq!(&tables, &[]);
+
+        Ok(())
+    }
 
     /// Test [`Database::backup()`] by:
     ///
