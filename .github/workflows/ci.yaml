@@ -203,6 +203,9 @@ jobs:
       - name: Build novelnote_admin docs
         run: cargo docs-rs --verbose --package novelnote_admin
 
+      - name: Build novelnote_core docs
+        run: cargo docs-rs --verbose --package novelnote_core
+
       - name: Build novelnote_database docs
         run: cargo docs-rs --verbose --package novelnote_database
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["admin", "database", "server", "web"]
+members = ["admin", "core", "database", "server", "web"]
 resolver = "3"
 
 [workspace.package]
@@ -123,6 +123,7 @@ verbose_file_reads = "warn"
 [workspace.dependencies]
 jiff = { version = "0.2.22", features = ["logging", "serde"] }
 novelnote_admin = { version = "0.1.0-alpha.1", path = "admin" }
+novelnote_core = { version = "0.1.0-alpha.1", path = "core" }
 novelnote_database = { version = "0.1.0-alpha.2", path = "database" }
 novelnote_server = { version = "0.1.0-alpha.4", path = "server" }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -132,11 +133,27 @@ tokio = "1.50.0"
 tokio-util = "0.7.18"
 tracing = "0.1.44"
 tracing-error = "0.2.1"
+uuid = { version = "1.26.1", features = ["serde"] }
+
+[workspace.dependencies.lettre]
+version = "0.11.23"
+default-features = false
+features = ["serde", "tracing"]
+
+[workspace.dependencies.rkyv]
+version = "0.8.15"
+features = ["little_endian", "aligned", "pointer_width_32"]
 
 [workspace.dependencies.test-log]
 version = "0.2.19"
 default-features = false
 features = ["color", "trace"]
+
+[profile.test.package.proptest]
+opt-level = 3
+
+[profile.test.package.rand_chacha]
+opt-level = 3
 
 [package]
 name = "novelnote"

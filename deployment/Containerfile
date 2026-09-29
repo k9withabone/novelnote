@@ -21,11 +21,13 @@ RUN rustup target add "$(cat /rust_target.txt)"
 FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY admin/Cargo.toml ./admin/
+COPY core/Cargo.toml ./core/
 COPY database/Cargo.toml ./database/
 COPY server/Cargo.toml ./server/
 COPY web/Cargo.toml ./web/
 COPY src ./src
 COPY admin/src ./admin/src
+COPY core/src ./core/src
 COPY database/src ./database/src
 COPY server/src ./server/src
 COPY web/src ./web/src
@@ -39,11 +41,13 @@ RUN cargo chef cook \
   --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY admin/Cargo.toml ./admin/
+COPY core/Cargo.toml ./core/
 COPY database/Cargo.toml ./database/
 COPY server/Cargo.toml ./server/
 COPY web/Cargo.toml ./web/
 COPY src ./src
 COPY admin/src ./admin/src
+COPY core/src ./core/src
 COPY database/src ./database/src
 COPY server/src ./server/src
 COPY web/src ./web/src
@@ -61,11 +65,13 @@ RUN cargo chef cook \
   --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY admin/Cargo.toml ./admin/
+COPY core/Cargo.toml ./core/
 COPY database/Cargo.toml ./database/
 COPY server/Cargo.toml ./server/
 COPY web/Cargo.toml web/index.html web/index.css ./web/
 COPY src ./src
 COPY admin/src ./admin/src
+COPY core/src ./core/src
 COPY database/src ./database/src
 COPY server/src ./server/src
 COPY web/src ./web/src

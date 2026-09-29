@@ -18,7 +18,7 @@ bytes = "1.11.1"
 futures-util = { version = "0.3.32", default-features = false, features = ["sink", "std"] }
 interprocess = { version = "2.4.0", features = ["tokio"] }
 novelnote_database.workspace = true
-rkyv = { version = "0.8.15", features = ["little_endian", "aligned", "pointer_width_32"] }
+rkyv.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "sync"] }
 tokio-stream = { version = "0.1.18", default-features = false }
