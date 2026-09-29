@@ -10,15 +10,15 @@ notes for the table. Finally, if any of the columns are mapped to custom Rust ty
 
 ## users
 
-| Column         | SQLite Type                | Rust Type                 |
-| -------------- | -------------------------- | ------------------------- |
-| id             | BLOB PRIMARY KEY           | `Uuid`                    |
-| username       | TEXT UNIQUE NOT NULL       | `Username`                |
-| password_hash  | TEXT                       | `Option<String>`          |
-| openid         | TEXT UNIQUE                | `Option<String>`          |
-| email          | TEXT UNIQUE                | `Option<lettre::Address>` |
-| email_verified | INTEGER NOT NULL DEFAULT 0 | `bool`                    |
-| display_name   | TEXT                       | `Option<Name>`            |
+| Column         | SQLite Type                | Rust Type                                             |
+| -------------- | -------------------------- | ----------------------------------------------------- |
+| id             | BLOB PRIMARY KEY           | `Uuid`                                                |
+| username       | TEXT UNIQUE NOT NULL       | `Username`                                            |
+| password_hash  | TEXT                       | `Option<String>`                                      |
+| openid         | TEXT UNIQUE                | `Option<String>`                                      |
+| email          | TEXT UNIQUE                | `Option<lettre::Address>` into `Option<EmailAddress>` |
+| email_verified | INTEGER NOT NULL DEFAULT 0 | `bool`                                                |
+| display_name   | TEXT                       | `Option<Name>`                                        |
 
 User has to be able to log in with a password or via OIDC:
 ```sql
@@ -53,5 +53,10 @@ struct Username(String);
 
 // Not empty, no new lines.
 struct Name(String);
-```
 
+// Uses `email` and `email_verified` columns to construct.
+enum EmailAddress {
+    Verified(lettre::Address),
+    Unverified(lettre::Address),
+}
+```
