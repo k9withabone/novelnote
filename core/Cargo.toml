@@ -20,6 +20,7 @@ rkyv = { workspace = true, features = ["uuid-1"] }
 serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+zxcvbn = { version = "3.1.1", default-features = false }
 
 [dev-dependencies]
 proptest = { version = "1.11.0", default-features = false, features = ["std"] }

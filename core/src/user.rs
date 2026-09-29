@@ -1,9 +1,9 @@
-//! [`User`] and [`Username`].
+//! [`User`] and related types.
 
 use std::{
     borrow::{Borrow, Cow},
     cmp::Ordering,
-    fmt::{self, Display, Formatter},
+    fmt::{self, Debug, Display, Formatter},
 };
 
 use rkyv::{
@@ -12,6 +12,7 @@ use rkyv::{
 };
 use thiserror::Error;
 use uuid::Uuid;
+use zxcvbn::zxcvbn;
 
 pub use crate::rkyv_with::ArchivedLettreAddress;
 use crate::{AsStr, Name, rkyv_with::LettreAddress};
@@ -814,6 +815,136 @@ impl PartialEq<Cow<'_, str>> for ArchivedEmailAddress {
 impl PartialEq<ArchivedEmailAddress> for Cow<'_, str> {
     fn eq(&self, other: &ArchivedEmailAddress) -> bool {
         self.as_ref() == other.as_str()
+    }
+}
+
+/// Score a password's strength.
+///
+/// Passwords are scored based on how many guesses it would take for an attacker to crack it.
+/// A password must score at least [`Three`](PasswordScore::Three) (more than 10^8 guesses to crack)
+/// for it to be accepted.
+///
+/// `user_inputs` is used to check if any other user supplied information is included in the
+/// password, making it easier to guess.
+///
+/// # Errors
+///
+/// Returns an error if the password scores less than [`Three`](PasswordScore::Three).
+pub fn score_password(
+    password: &str,
+    user_inputs: &[&str],
+) -> Result<PasswordScore, WeakPasswordError> {
+    let entropy = zxcvbn(password, user_inputs);
+    if entropy.score() < zxcvbn::Score::Three {
+        Err(WeakPasswordError::from_zxcvbn(&entropy))
+    } else {
+        Ok(PasswordScore::from_zxcvbn(entropy.score()))
+    }
+}
+
+/// Score of a password's strength based on how many guesses it would take to crack.
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub enum PasswordScore {
+    /// 10^3 guesses or less.
+    Zero,
+    /// 10^6 guesses or less.
+    One,
+    /// 10^8 guesses or less.
+    Two,
+    /// 10^10 guesses or less.
+    Three,
+    /// 10^10 guesses or more.
+    Four,
+}
+
+impl PasswordScore {
+    /// Create a [`PasswordScore`] from a [`zxcvbn::Score`].
+    const fn from_zxcvbn(score: zxcvbn::Score) -> Self {
+        match score {
+            zxcvbn::Score::Zero => Self::Zero,
+            zxcvbn::Score::One => Self::One,
+            zxcvbn::Score::Two => Self::Two,
+            zxcvbn::Score::Three => Self::Three,
+            zxcvbn::Score::Four | _ => Self::Four,
+        }
+    }
+}
+
+impl From<PasswordScore> for u8 {
+    fn from(value: PasswordScore) -> Self {
+        match value {
+            PasswordScore::Zero => 0,
+            PasswordScore::One => 1,
+            PasswordScore::Two => 2,
+            PasswordScore::Three => 3,
+            PasswordScore::Four => 4,
+        }
+    }
+}
+
+impl Display for PasswordScore {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&u8::from(*self), f)
+    }
+}
+
+/// Error returned when [scoring a password](score_password()) and it is found to be too weak
+/// (scored less than [`Three`](PasswordScore::Three)).
+#[derive(
+    Error,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[error("password was too weak, on a 0-4 scale it scored a {score}")]
+pub struct WeakPasswordError {
+    /// The password's score based on how many guesses it would take to crack.
+    pub score: PasswordScore,
+
+    /// What's wrong with the password.
+    pub warning: Option<String>,
+
+    /// Suggestions to improve the password's strength.
+    pub suggestions: Vec<String>,
+}
+
+impl WeakPasswordError {
+    /// Create a [`WeakPasswordError`] from a [`zxcvbn::Entropy`].
+    fn from_zxcvbn(entropy: &zxcvbn::Entropy) -> Self {
+        let (warning, suggestions) = entropy.feedback().map_or_default(|feedback| {
+            let warning = feedback.warning().as_ref().map(ToString::to_string);
+            let suggestions = feedback
+                .suggestions()
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            (warning, suggestions)
+        });
+
+        Self {
+            score: PasswordScore::from_zxcvbn(entropy.score()),
+            warning,
+            suggestions,
+        }
     }
 }
 
