@@ -1,13 +1,18 @@
 //! `novelnote_database` provides the SQLite [`Database`] interface for NovelNote, a self-hosted
 //! book tracker.
 
+pub mod users;
+
 use std::{
     any::Any,
+    error::Error,
     path::Path,
+    str::FromStr,
     sync::Arc,
     thread::{self, JoinHandle},
 };
 
+use rusqlite::{OptionalExtension, Params, Row, types::Type};
 use rusqlite_migration::{M, Migrations};
 use thiserror::Error;
 use tokio::{
@@ -19,6 +24,9 @@ use tokio::{
 };
 use tracing::{debug, instrument, trace, trace_span};
 use tracing_error::SpanTrace;
+use uuid::Uuid;
+
+pub use crate::users::Users;
 
 /// Slice of database schema migrations.
 const MIGRATIONS_SLICE: &[M] = &[M::up(include_str!("migrations/users.sql"))
@@ -109,15 +117,53 @@ impl Database {
     /// Returns an error if the database is closed or the backup fails.
     //
     // Takes a string for the path because it is used as a SQL parameter.
-    #[instrument(level = "trace", skip_all, fields(path = path.as_ref()))]
-    pub async fn backup<P>(&self, path: P) -> Result<(), ExecuteError>
+    #[instrument(level = "trace", skip(self))]
+    pub async fn backup(&self, path: String) -> Result<(), ExecuteError> {
+        self.execute("VACUUM INTO ?1", path).await
+    }
+
+    /// Interact with the `users` table.
+    #[must_use]
+    pub const fn users(&self) -> Users<'_> {
+        Users { database: self }
+    }
+
+    /// Execute a single SQL statement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database is closed or SQLite returned an error.
+    async fn execute<P>(&self, sql: &'static str, params: P) -> Result<(), ExecuteError>
     where
-        P: AsRef<str> + Send + 'static,
+        P: AsParams + Send + 'static,
+    {
+        self.call(move |connection| connection.execute(sql, params.as_params()).map(|_| ()))
+            .await?
+            .map_err(ExecuteError::from_rusqlite)
+    }
+
+    /// Execute a cached SQL query that is expected to return a single row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database is closed, SQLite returned an error, or more than one row
+    /// was returned.
+    async fn query_one_cached<P, F, T>(
+        &self,
+        sql: &'static str,
+        params: P,
+        map_fn: F,
+    ) -> Result<Option<T>, ExecuteError>
+    where
+        P: AsParams + Send + 'static,
+        F: FnOnce(&Row<'_>) -> Result<T, rusqlite::Error> + Send + 'static,
+        T: Send + 'static,
     {
         self.call(move |connection| {
             connection
-                .execute("VACUUM INTO ?1", [path.as_ref()])
-                .map(|_| ())
+                .prepare_cached(sql)?
+                .query_one(params.as_params(), map_fn)
+                .optional()
         })
         .await?
         .map_err(ExecuteError::from_rusqlite)
@@ -293,6 +339,24 @@ impl<T> From<mpsc::error::SendError<T>> for ConnectionClosed {
 impl From<oneshot::error::RecvError> for ConnectionClosed {
     fn from(_: oneshot::error::RecvError) -> Self {
         Self
+    }
+}
+
+/// Convert a type into parameters for a SQL statement.
+trait AsParams {
+    /// Convert this value into SQL statement/query parameters.
+    fn as_params(&self) -> impl Params;
+}
+
+impl AsParams for String {
+    fn as_params(&self) -> impl Params {
+        [self]
+    }
+}
+
+impl AsParams for Uuid {
+    fn as_params(&self) -> impl Params {
+        [*self]
     }
 }
 
@@ -505,10 +569,60 @@ impl CloseHandle {
     }
 }
 
+/// An extension trait for [`Row`].
+trait RowExt {
+    /// Get a column value from the row and, if it is a string, parse it into another type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index is out of bounds for the row, the value is not a string or
+    /// `NULL`, or there is an error while parsing the value.
+    fn parse_str<T>(&self, index: usize) -> Result<T, rusqlite::Error>
+    where
+        T: FromStr,
+        T::Err: Error + Send + Sync + 'static;
+
+    /// Get a column value from the row and, if it is a string, parse it into another type, or if it
+    /// is `NULL`, return [`None`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index is out of bounds for the row, the value is not a string, or
+    /// there is an error while parsing the value.
+    fn parse_str_or_none<T>(&self, index: usize) -> Result<Option<T>, rusqlite::Error>
+    where
+        T: FromStr,
+        T::Err: Error + Send + Sync + 'static;
+}
+
+impl RowExt for Row<'_> {
+    fn parse_str<T>(&self, index: usize) -> Result<T, rusqlite::Error>
+    where
+        T: FromStr,
+        T::Err: Error + Send + Sync + 'static,
+    {
+        self.get_ref(index)?.as_str()?.parse().map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(index, Type::Text, Box::new(error))
+        })
+    }
+
+    fn parse_str_or_none<T>(&self, index: usize) -> Result<Option<T>, rusqlite::Error>
+    where
+        T: FromStr,
+        T::Err: Error + Send + Sync + 'static,
+    {
+        self.get_ref(index)?
+            .as_str_or_null()?
+            .map(str::parse)
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(index, Type::Text, Box::new(error))
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
-
     use tempfile::NamedTempFile;
 
     use super::*;
