@@ -8,6 +8,7 @@ use std::{
     borrow::{Borrow, Cow},
     cmp::Ordering,
     fmt::{self, Display, Formatter},
+    str::FromStr,
 };
 
 use rkyv::{
@@ -98,6 +99,14 @@ impl<'de> serde::Deserialize<'de> for Name {
         Box::<str>::deserialize(deserializer)?
             .try_into()
             .map_err(serde::de::Error::custom)
+    }
+}
+
+impl FromStr for Name {
+    type Err = InvalidNameError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
     }
 }
 
