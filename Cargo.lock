@@ -1797,6 +1797,7 @@ dependencies = [
 name = "novelnote_database"
 version = "0.1.0-alpha.2"
 dependencies = [
+ "novelnote_core",
  "rusqlite",
  "rusqlite_migration",
  "tempfile",
@@ -1804,6 +1805,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-error",
+ "uuid",
 ]
 
 [[package]]
@@ -2374,6 +2376,7 @@ dependencies = [
  "libsqlite3-sys",
  "smallvec",
  "sqlite-wasm-rs",
+ "uuid",
 ]
 
 [[package]]

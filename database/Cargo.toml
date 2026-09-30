@@ -14,12 +14,14 @@ keywords.workspace = true
 workspace = true
 
 [dependencies]
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+novelnote_core.workspace = true
+rusqlite = { version = "0.40.2", features = ["bundled", "uuid"] }
 rusqlite_migration = "~2.6.0"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true
 tracing-error.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
