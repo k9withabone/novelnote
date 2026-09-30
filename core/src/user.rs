@@ -4,6 +4,7 @@ use std::{
     borrow::{Borrow, Cow},
     cmp::Ordering,
     fmt::{self, Debug, Display, Formatter},
+    str::FromStr,
 };
 
 use rkyv::{
@@ -205,6 +206,14 @@ impl<'de> serde::Deserialize<'de> for Username {
         Box::<str>::deserialize(deserializer)?
             .try_into()
             .map_err(serde::de::Error::custom)
+    }
+}
+
+impl FromStr for Username {
+    type Err = InvalidUsernameError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
     }
 }
 
