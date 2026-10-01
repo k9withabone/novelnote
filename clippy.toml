@@ -3,19 +3,22 @@
 absolute-paths-allowed-crates = ["leptos"]
 absolute-paths-max-segments = 3
 allowed-duplicate-crates = [
-  # `confique`, `leptos`, `rkyv`, `test-log`, `tracing`, and `utoipa` use `syn@2`
+  # `confique`, `leptos`, `rkyv`, `test-log`, and `tracing` use `syn@2`
   "syn",
 
   # `jiff` uses `bitflags@1`
   "bitflags",
 
-  # `leptos` dependencies
-  "foldhash",
+  # `rusqlite` uses `hashbrown@0.16`
   "hashbrown",
+
+  # `proptest` uses `getrandom@0.3`
+  "getrandom",
+
+  # `leptos` dependencies
   "convert_case",
   "thiserror",
   "thiserror-impl",
-  "getrandom",
   "winnow",
 ]
 allowed-idents-below-min-chars = ["s", "f", "v", "M", ".."]
