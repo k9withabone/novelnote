@@ -133,6 +133,7 @@ tokio = "1.50.0"
 tokio-util = "0.7.18"
 tracing = "0.1.44"
 tracing-error = "0.2.1"
+utoipa = "6.0.0"
 uuid = { version = "1.26.1", features = ["serde"] }
 
 [workspace.dependencies.lettre]
