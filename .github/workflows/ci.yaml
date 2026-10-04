@@ -44,8 +44,14 @@ jobs:
         with:
           components: clippy
 
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+
       - name: Clippy Checks
-        run: cargo clippy --verbose --workspace --tests -- -D warnings
+        run: cargo clippy --verbose --workspace --all-features --tests -- -D warnings
+
+      - name: Feature Combination Clippy Checks
+        run: cargo hack clippy --verbose --workspace --feature-powerset --no-dev-deps -- -D warnings
 
   test:
     runs-on: ubuntu-latest
@@ -62,7 +68,7 @@ jobs:
       - name: Run Tests
         env:
           RUST_LOG: trace
-        run: cargo test --verbose --workspace
+        run: cargo test --verbose --workspace --all-features
 
   test-admin-socket-windows:
     runs-on: windows-latest
@@ -185,7 +191,7 @@ jobs:
       - name: Build docs
         env:
           RUSTDOCFLAGS: "-Dwarnings"
-        run: cargo doc --verbose --workspace --document-private-items --no-deps
+        run: cargo doc --verbose --workspace --all-features --document-private-items --no-deps
 
   # Builds docs as docs.rs does
   docs-rs:
