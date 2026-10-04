@@ -1,5 +1,11 @@
 //! `novelnote_core` provides shared type definitions for NovelNote packages. NovelNote is a
 //! self-hosted book tracker.
+//!
+//! # Cargo Features
+//!
+//! - `utoipa`: Enables [`utoipa`] traits like [`ToSchema`](utoipa::ToSchema).
+
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod rkyv_with;
 pub mod user;
