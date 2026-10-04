@@ -13,12 +13,16 @@ keywords.workspace = true
 [lints]
 workspace = true
 
+[features]
+utoipa = ["dep:utoipa"]
+
 [dependencies]
 email_address = { version = "0.2.9", default-features = false }
 lettre.workspace = true
 rkyv = { workspace = true, features = ["uuid-1"] }
 serde.workspace = true
 thiserror.workspace = true
+utoipa = { workspace = true, features = ["uuid"], optional = true }
 uuid.workspace = true
 zxcvbn = { version = "3.1.1", default-features = false }
 

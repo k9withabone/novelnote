@@ -35,6 +35,8 @@ pub use crate::user::{User, Username};
     Ord,
     Hash,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "utoipa", schema(min_length = 1, pattern = r"\S+(.*\S+)?"))]
 #[rkyv(derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash), bytecheck(verify))]
 pub struct Name(#[rkyv(with = AsStr)] Box<str>);
 

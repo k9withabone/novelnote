@@ -1788,6 +1788,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "utoipa",
  "uuid",
  "zxcvbn",
 ]
@@ -3332,6 +3333,7 @@ dependencies = [
  "quote",
  "regex",
  "syn 3.0.6",
+ "uuid",
 ]
 
 [[package]]
