@@ -30,6 +30,7 @@ use crate::{AsStr, Name, rkyv_with::LettreAddress};
     PartialEq,
     Eq,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 #[rkyv(derive(Debug, PartialEq, Eq), compare(PartialEq))]
 pub struct User {
@@ -101,6 +102,15 @@ impl ArchivedUser {
     PartialOrd,
     Ord,
     Hash,
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(
+    feature = "utoipa",
+    schema(
+        min_length = 1,
+        max_length = 256,
+        pattern = "[a-zA-Z_][a-zA-Z0-9_.-]{0,254}[a-zA-Z0-9_.$-]?",
+    )
 )]
 #[rkyv(derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash), bytecheck(verify))]
 pub struct Username(#[rkyv(with = AsStr)] Box<str>);
@@ -578,11 +588,17 @@ impl PartialOrd<ArchivedUsername> for Cow<'_, str> {
     Eq,
     Hash,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(
+    feature = "utoipa",
+    schema(examples(json!({"status": "unverified", "address": "user@example.com"}))),
+)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 #[serde(rename_all = "snake_case", tag = "status", content = "address")]
 #[rkyv(derive(Debug, PartialEq, Eq, Hash), compare(PartialEq))]
 pub enum EmailAddress {
     /// It is unknown if the email address belongs to the user.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = IdnEmail))]
     Unverified(
         #[rkyv(with = LettreAddress)]
         #[cfg_attr(
@@ -593,6 +609,7 @@ pub enum EmailAddress {
     ),
 
     /// The email address has been confirmed to belong to the user.
+    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = IdnEmail))]
     Verified(
         #[rkyv(with = LettreAddress)]
         #[cfg_attr(
