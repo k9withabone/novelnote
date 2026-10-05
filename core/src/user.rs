@@ -52,11 +52,13 @@ pub struct User {
     /// The user's email address.
     ///
     /// If enabled by the server admin, can be used for password resets and notifications.
+    #[serde(default)]
     pub email: Option<EmailAddress>,
 
     /// The user's display name.
     ///
     /// Shown when the user is logged in and in user lists if set.
+    #[serde(default)]
     pub display_name: Option<Name>,
 }
 
@@ -868,10 +870,32 @@ pub fn score_password(
     }
 }
 
-/// Score of a password's strength based on how many guesses it would take to crack.
+/// Request body parameters for the POST `/api/auth/score-password` route.
 #[derive(
     serde::Serialize,
     serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ScorePasswordParameters {
+    /// Password to score.
+    pub password: String,
+
+    /// Other user supplied information to check the password for.
+    #[serde(default)]
+    pub user_inputs: Vec<String>,
+}
+
+/// Score of a password's strength based on how many guesses it would take to crack.
+#[derive(
+    serde_repr::Serialize_repr,
+    serde_repr::Deserialize_repr,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
@@ -883,9 +907,11 @@ pub fn score_password(
     PartialOrd,
     Ord,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[repr(u8)]
 pub enum PasswordScore {
     /// 10^3 guesses or less.
-    Zero,
+    Zero = 0,
     /// 10^6 guesses or less.
     One,
     /// 10^8 guesses or less.
@@ -941,15 +967,22 @@ impl Display for PasswordScore {
     PartialEq,
     Eq,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(
+    feature = "utoipa",
+    schema(description = "Error returned when a password is scored less than 3.")
+)]
 #[error("password was too weak, on a 0-4 scale it scored a {score}")]
 pub struct WeakPasswordError {
     /// The password's score based on how many guesses it would take to crack.
     pub score: PasswordScore,
 
     /// What's wrong with the password.
+    #[serde(default)]
     pub warning: Option<String>,
 
     /// Suggestions to improve the password's strength.
+    #[serde(default)]
     pub suggestions: Vec<String>,
 }
 
