@@ -1787,6 +1787,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "serde_repr",
  "thiserror 2.0.21",
  "utoipa",
  "uuid",
@@ -2526,6 +2527,17 @@ dependencies = [
  "percent-encoding",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "serde_repr"
+version = "0.1.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d3b1629de253c70a0508c3899572da79ca359fdab27c7920ff00406df418906"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]
