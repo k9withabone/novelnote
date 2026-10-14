@@ -1,6 +1,6 @@
 [package]
 name = "novelnote_server"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 description = "Server library for NovelNote, a self-hosted book tracker"
 categories = ["web-programming", "web-programming::http-server"]
 authors.workspace = true
@@ -15,7 +15,12 @@ workspace = true
 
 [dependencies]
 axum = "0.8.8"
+itertools = "0.14"
+mime = "0.3.17"
+novelnote_core = { workspace = true, features = ["utoipa"] }
 novelnote_database.workspace = true
+rkyv.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }
 tower-http = { version = "0.7.1", features = ["fs", "timeout", "trace"] }
@@ -24,3 +29,7 @@ tracing-error.workspace = true
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-axum = "0.3.0"
 utoipa-redoc = { version = "7.0.0", features = ["axum"] }
+
+[dev-dependencies]
+proptest.workspace = true
+tokio = { workspace = true, features = ["macros"] }
