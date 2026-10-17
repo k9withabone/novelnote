@@ -125,7 +125,8 @@ jiff = { version = "0.2.22", features = ["logging", "serde"] }
 novelnote_admin = { version = "0.1.0-alpha.1", path = "admin" }
 novelnote_core = { version = "0.1.0-alpha.1", path = "core" }
 novelnote_database = { version = "0.1.0-alpha.2", path = "database" }
-novelnote_server = { version = "0.1.0-alpha.5", path = "server" }
+novelnote_server = { version = "0.1.0-alpha.6", path = "server" }
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tempfile = "3.27.0"
 thiserror = "2.0.18"

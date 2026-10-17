@@ -1811,10 +1811,16 @@ dependencies = [
 
 [[package]]
 name = "novelnote_server"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "axum",
+ "itertools",
+ "mime",
+ "novelnote_core",
  "novelnote_database",
+ "proptest",
+ "rkyv",
+ "serde",
  "thiserror 2.0.21",
  "tokio",
  "tower-http",
