@@ -2,7 +2,13 @@
 
 mod api;
 
-use std::{io, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{
+    fmt::{self, Display, Formatter},
+    io,
+    net::SocketAddr,
+    path::PathBuf,
+    time::Duration,
+};
 
 use axum::{Router, http::StatusCode};
 use novelnote_database::Database;
@@ -17,8 +23,8 @@ use tracing_error::TracedError;
 /// Use [`Server::run()`] to start it.
 #[derive(Debug, Clone)]
 pub struct Server {
-    /// Socket address the server binds to.
-    pub socket_address: SocketAddr,
+    /// TCP socket address or Unix domain socket path the server binds to.
+    pub bind_address: BindAddress,
 
     /// Directory to serve from the root.
     ///
@@ -41,7 +47,7 @@ impl Server {
         level = "trace",
         skip_all,
         fields(
-            socket_address = %self.socket_address,
+            bind_address = %self.bind_address,
             asset_directory = %self.asset_directory.display(),
         ),
     )]
@@ -50,7 +56,7 @@ impl Server {
         F: Future<Output = ()> + Send + 'static,
     {
         let Self {
-            socket_address,
+            bind_address,
             asset_directory,
             database,
         } = self;
@@ -68,36 +74,81 @@ impl Server {
             .fallback_service(ServeDir::new(asset_directory))
             .with_state(database);
 
-        let listener =
-            TcpListener::bind(socket_address)
-                .await
-                .map_err(|source| ServerError::Bind {
-                    socket_address,
+        match bind_address {
+            BindAddress::Tcp(socket_address) => {
+                let listener = TcpListener::bind(socket_address).await.map_err(|source| {
+                    ServerError::Bind {
+                        bind_address: socket_address.into(),
+                        source,
+                    }
+                })?;
+                let address = listener.local_addr().map_err(|source| ServerError::Bind {
+                    bind_address: socket_address.into(),
                     source,
                 })?;
-        let address = listener.local_addr().map_err(|source| ServerError::Bind {
-            socket_address,
-            source,
-        })?;
 
-        let serve = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal);
-        info!("listening on {address}");
-        serve
-            .await
-            .map_err(|source| ServerError::Listen { source })?;
+                let serve = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal);
+                info!("listening on {address}");
+                serve
+                    .await
+                    .map_err(|source| ServerError::Listen { source })?;
+            }
+            #[cfg(unix)]
+            BindAddress::Unix(path) => {
+                use tokio::net::UnixListener;
+
+                let listener = UnixListener::bind(&path).map_err(|source| ServerError::Bind {
+                    bind_address: BindAddress::Unix(path.clone()),
+                    source,
+                })?;
+
+                let serve = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal);
+                info!("listening at `{}`", path.display());
+                serve
+                    .await
+                    .map_err(|source| ServerError::Listen { source })?;
+            }
+        }
 
         Ok(())
+    }
+}
+
+/// TCP socket address or Unix domain socket path a [`Server`] should bind to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindAddress {
+    /// Bind the server to a TCP socket.
+    Tcp(SocketAddr),
+
+    /// Bind the server to a Unix domain socket.
+    #[cfg(unix)]
+    Unix(PathBuf),
+}
+
+impl Display for BindAddress {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::Tcp(socket_addr) => Display::fmt(socket_addr, f),
+            #[cfg(unix)]
+            Self::Unix(path) => Display::fmt(&path.display(), f),
+        }
+    }
+}
+
+impl From<SocketAddr> for BindAddress {
+    fn from(value: SocketAddr) -> Self {
+        Self::Tcp(value)
     }
 }
 
 /// Error returned from [`Server::run()`].
 #[derive(Error, Debug)]
 pub enum ServerError {
-    /// Error binding to the given socket address.
-    #[error("error binding to socket address `{socket_address}`")]
+    /// Error binding to the given address.
+    #[error("error binding to `{bind_address}`")]
     Bind {
-        /// Socket address binding was attempted for.
-        socket_address: SocketAddr,
+        /// Address binding was attempted for.
+        bind_address: BindAddress,
 
         /// Error source.
         source: io::Error,
