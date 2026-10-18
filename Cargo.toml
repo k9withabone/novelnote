@@ -140,7 +140,7 @@ features = ["color", "trace"]
 
 [package]
 name = "novelnote"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 description = "Self-hosted book tracker"
 categories = [
   "web-programming",

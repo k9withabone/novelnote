@@ -157,9 +157,12 @@
 
 # HTTP server configuration.
 [http]
-# IP address the HTTP server should bind to.
+# IP address or Unix domain socket path the HTTP server should bind to.
 #
-# Defaults to binding to all interfaces.
+# Unix domain socket paths must start with `/`, `./`, or `../`. They are only supported on
+# Unix (Linux and macOS).
+#
+# Defaults to binding to all IP interfaces (`0.0.0.0`).
 #
 # Can also be specified via environment variable `HTTP_ADDRESS`.
 #

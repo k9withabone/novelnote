@@ -344,7 +344,7 @@ async fn run_servers(
         .open(dirs)
         .await
         .wrap_err("error opening database")?;
-    let http_server = http.into_server(database.clone()).await;
+    let http_server = http.try_into_server(database.clone()).await?;
 
     let cancellation_token = CancellationToken::new();
     tokio::spawn(shutdown_signal(cancellation_token.clone()));
