@@ -13,7 +13,7 @@ use std::{
 use clap::{Args, ValueEnum};
 use color_eyre::{
     Section,
-    eyre::{Report, WrapErr, ensure},
+    eyre::{Report, WrapErr, ensure, eyre},
 };
 use confique::toml::FormatOptions;
 use directories::ProjectDirs;
@@ -831,9 +831,12 @@ pub(crate) struct DatabaseBackupConfig {
 #[config(layer_attr(derive(Args, Debug, Clone, PartialEq, Eq)))]
 #[config(layer_attr(command(next_help_heading = "HTTP Server Options")))]
 pub(crate) struct HttpServerConfig {
-    /// IP address the HTTP server should bind to.
+    /// IP address or Unix domain socket path the HTTP server should bind to.
     ///
-    /// Defaults to binding to all interfaces.
+    /// Unix domain socket paths must start with `/`, `./`, or `../`. They are only supported on
+    /// Unix (Linux and macOS).
+    ///
+    /// Defaults to binding to all IP interfaces (`0.0.0.0`).
     #[config(
         env = "HTTP_ADDRESS",
         default = "0.0.0.0",
@@ -844,7 +847,7 @@ pub(crate) struct HttpServerConfig {
             visible_alias = "http-address",
         ))
     )]
-    pub bind_address: IpAddr,
+    pub bind_address: BindAddress,
 
     /// TCP port the HTTP server should bind to.
     #[config(
@@ -872,22 +875,22 @@ pub(crate) struct HttpServerConfig {
 
 impl HttpServerConfig {
     /// Create [`Server`] from config.
-    pub(crate) async fn into_server(self, database: Database) -> Server {
+    pub(crate) async fn try_into_server(self, database: Database) -> Result<Server, Report> {
         let Self {
             bind_address,
             port,
             asset_directory,
         } = self;
 
-        Server {
-            socket_address: SocketAddr::new(bind_address, port),
+        Ok(Server {
+            bind_address: bind_address.try_into_server_address(port)?,
             asset_directory: if let Some(asset_directory) = asset_directory {
                 asset_directory
             } else {
                 default_asset_directory().await
             },
             database,
-        }
+        })
     }
 }
 
@@ -914,6 +917,70 @@ async fn default_asset_directory() -> PathBuf {
     }
 
     PathBuf::from("dist")
+}
+
+/// IP address or Unix domain socket path for [`HttpServerConfig`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BindAddress {
+    /// Bind HTTP server to an IP address.
+    Ip(IpAddr),
+
+    /// Bind HTTP server to Unix domain socket path.
+    Unix(PathBuf),
+}
+
+impl BindAddress {
+    /// Attempt to convert into a [`Server`] bind address.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a Unix domain socket path was given on a non-Unix system.
+    #[expect(clippy::unnecessary_wraps, reason = "cfg")]
+    fn try_into_server_address(self, port: u16) -> Result<novelnote_server::BindAddress, Report> {
+        match self {
+            Self::Ip(ip) => Ok(SocketAddr::new(ip, port).into()),
+
+            #[cfg(unix)]
+            Self::Unix(path) => Ok(novelnote_server::BindAddress::Unix(path)),
+
+            #[cfg(not(unix))]
+            Self::Unix(path) => Err(eyre!(
+                "cannot bind HTTP server to `{}`",
+                path.display(),
+            ))
+            .warning(
+                "binding the HTTP server to a Unix domain socket path is only supported on Unix \
+                 systems",
+            ),
+        }
+    }
+}
+
+impl FromStr for BindAddress {
+    type Err = Report;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse() {
+            Ok(ip) => Ok(Self::Ip(ip)),
+            Err(_) if s.starts_with('/') || s.starts_with("./") || s.starts_with("../") => {
+                Ok(Self::Unix(s.into()))
+            }
+            Err(error) => Err(eyre!(
+                // Normally, including the error in the `Report` message is bad practice, but in
+                // this case it is necessary as sources are not displayed by `clap` errors.
+                "error parsing `{s}` as an IP address: {error}; if the address is a Unix domain \
+                 socket path, it must start with `/`, `./`, or `../`"
+            )),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BindAddress {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(de::Error::custom)
+    }
 }
 
 #[cfg(test)]
