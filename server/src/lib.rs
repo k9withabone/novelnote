@@ -96,17 +96,46 @@ impl Server {
             #[cfg(unix)]
             BindAddress::Unix(path) => {
                 use tokio::net::UnixListener;
+                use tracing::{debug, warn};
 
-                let listener = UnixListener::bind(&path).map_err(|source| ServerError::Bind {
-                    bind_address: BindAddress::Unix(path.clone()),
-                    source,
-                })?;
+                let listener = match UnixListener::bind(&path) {
+                    Ok(listener) => listener,
+                    Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
+                        if tokio::fs::remove_file(&path).await.is_ok() {
+                            debug!("reclaimed Unix domain socket path");
+                            UnixListener::bind(&path).map_err(|source| ServerError::Bind {
+                                bind_address: BindAddress::Unix(path.clone()),
+                                source,
+                            })?
+                        } else {
+                            return Err(ServerError::Bind {
+                                bind_address: BindAddress::Unix(path),
+                                source: error,
+                            }
+                            .into());
+                        }
+                    }
+                    Err(source) => {
+                        return Err(ServerError::Bind {
+                            bind_address: BindAddress::Unix(path),
+                            source,
+                        }
+                        .into());
+                    }
+                };
 
                 let serve = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal);
                 info!("listening at `{}`", path.display());
                 serve
                     .await
                     .map_err(|source| ServerError::Listen { source })?;
+
+                // Check if `path` is an abstract socket path before attempting to remove it.
+                let abstract_socket =
+                    cfg!(any(target_os = "linux", target_os = "android")) && path.starts_with("\0");
+                if !abstract_socket && let Err(error) = tokio::fs::remove_file(&path).await {
+                    warn!(%error, "error removing Unix domain socket after closing");
+                }
             }
         }
 
