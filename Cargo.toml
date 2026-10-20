@@ -186,10 +186,13 @@ novelnote_admin.workspace = true
 novelnote_database.workspace = true
 novelnote_server.workspace = true
 serde.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-appender = "0.2.4"
 tracing-error.workspace = true
 tracing-journald = "0.3.2"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+
+[dependencies.tokio]
+workspace = true
+features = ["fs", "macros", "rt-multi-thread", "signal"]

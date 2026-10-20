@@ -2,7 +2,9 @@
 
 use std::{
     borrow::Cow,
+    fmt::{self, Display, Formatter},
     fs::Metadata,
+    io,
     net::{IpAddr, SocketAddr},
     num::NonZero,
     path::{Path, PathBuf},
@@ -258,7 +260,8 @@ impl AdminConfig {
     /// # Errors
     ///
     /// Returns an error if there is an error binding the admin server.
-    pub(crate) fn into_server(
+    #[cfg_attr(not(unix), expect(clippy::unused_async, reason = "cfg"))]
+    pub(crate) async fn try_into_server(
         self,
         dirs: &ProjectDirs,
         database: Database,
@@ -271,7 +274,13 @@ impl AdminConfig {
 
         if enabled {
             let socket_path = socket_path.unwrap_or_else(|| AdminSocketPath::default(dirs));
-            socket_path.create_dir()?;
+
+            #[cfg(unix)]
+            create_parent_dir(socket_path.as_ref())
+                .await
+                .wrap_err_with(|| {
+                    format!("error creating parent directory for admin socket `{socket_path}`")
+                })?;
 
             AdminServer::bind(socket_path.as_ref(), timeout.into(), database)
                 .map(Some)
@@ -343,20 +352,6 @@ impl AdminSocketPath {
 
         Self(path.into_boxed_path())
     }
-
-    /// Create directory the socket path is in if it does not exist.
-    fn create_dir(&self) -> Result<(), Report> {
-        if cfg!(unix)
-            && let Some(path) = self.0.parent()
-            && !path.is_dir()
-        {
-            std::fs::create_dir_all(path).wrap_err_with(|| {
-                format!("error creating socket path directory `{}`", path.display())
-            })?;
-            info!(socket_path_directory = %path.display(), "created socket path directory");
-        }
-        Ok(())
-    }
 }
 
 impl TryFrom<Box<Path>> for AdminSocketPath {
@@ -401,6 +396,12 @@ impl<'de> Deserialize<'de> for AdminSocketPath {
 impl AsRef<Path> for AdminSocketPath {
     fn as_ref(&self) -> &Path {
         &self.0
+    }
+}
+
+impl Display for AdminSocketPath {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&self.0.display(), f)
     }
 }
 
@@ -661,7 +662,7 @@ struct ZonedTime {
 }
 
 impl FormatTime for ZonedTime {
-    fn format_time(&self, w: &mut Writer) -> std::fmt::Result {
+    fn format_time(&self, w: &mut Writer) -> fmt::Result {
         let now = Timestamp::now()
             .to_zoned(self.timezone.clone())
             .round(Unit::Microsecond)
@@ -883,7 +884,7 @@ impl HttpServerConfig {
         } = self;
 
         Ok(Server {
-            bind_address: bind_address.try_into_server_address(port)?,
+            bind_address: bind_address.try_into_server_address(port).await?,
             asset_directory: if let Some(asset_directory) = asset_directory {
                 asset_directory
             } else {
@@ -934,24 +935,28 @@ impl BindAddress {
     ///
     /// # Errors
     ///
-    /// Returns an error if a Unix domain socket path was given on a non-Unix system.
-    #[expect(clippy::unnecessary_wraps, reason = "cfg")]
-    fn try_into_server_address(self, port: u16) -> Result<novelnote_server::BindAddress, Report> {
+    /// Returns an error if the Unix domain socket path's parent directory could not be created or a
+    /// Unix domain socket path was given on a non-Unix system.
+    async fn try_into_server_address(
+        self,
+        port: u16,
+    ) -> Result<novelnote_server::BindAddress, Report> {
         match self {
             Self::Ip(ip) => Ok(SocketAddr::new(ip, port).into()),
-
-            #[cfg(unix)]
-            Self::Unix(path) => Ok(novelnote_server::BindAddress::Unix(path)),
-
-            #[cfg(not(unix))]
-            Self::Unix(path) => Err(eyre!(
-                "cannot bind HTTP server to `{}`",
-                path.display(),
-            ))
-            .warning(
-                "binding the HTTP server to a Unix domain socket path is only supported on Unix \
-                 systems",
-            ),
+            Self::Unix(path) if cfg!(unix) => {
+                create_parent_dir(&path).await.wrap_err_with(|| {
+                    format!(
+                        "error creating parent directory for Unix domain socket `{}`",
+                        path.display(),
+                    )
+                })?;
+                Ok(novelnote_server::BindAddress::Unix(path))
+            }
+            Self::Unix(path) => Err(eyre!("cannot bind HTTP server to `{}`", path.display()))
+                .warning(
+                    "binding the HTTP server to a Unix domain socket path is only supported on \
+                     Unix systems",
+                ),
         }
     }
 }
@@ -981,6 +986,24 @@ impl<'de> Deserialize<'de> for BindAddress {
             .parse()
             .map_err(de::Error::custom)
     }
+}
+
+/// Create a path's parent directory and all its parent components.
+///
+/// # Errors
+///
+/// Returns an error if there is an error creating any parent components that do not already exist.
+async fn create_parent_dir(path: &Path) -> Result<(), io::Error> {
+    if let Some(parent) = path.parent()
+        && tokio::fs::metadata(parent)
+            .await
+            .map_or(true, |parent_meta| !parent_meta.is_dir())
+    {
+        tokio::fs::create_dir_all(parent).await?;
+        info!(dir = %parent.display(), "created directory");
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
