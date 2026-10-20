@@ -195,4 +195,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 [dependencies.tokio]
 workspace = true
-features = ["fs", "macros", "rt-multi-thread", "signal"]
+features = ["fs", "macros", "rt-multi-thread", "signal", "sync"]
+
+[target.'cfg(unix)'.dependencies]
+sd-notify = "0.5.0"

@@ -72,7 +72,7 @@ NovelNote is currently a work-in-progress.
   - [ ] CLI
   - [ ] TUI
 - [ ] systemd integration
-  - [ ] Service `Type=notify` support
+  - [x] Service `Type=notify` support
   - [ ] Socket activation with configurable timeout
 
 ## Packages

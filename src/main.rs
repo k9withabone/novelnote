@@ -20,7 +20,7 @@ use color_eyre::{
 use directories::ProjectDirs;
 use jiff::{Timestamp, Unit, civil::DateTime, tz::TimeZone};
 use novelnote_admin::AdminClient;
-use tokio::{select, signal, try_join};
+use tokio::{select, signal, sync::oneshot, task::spawn_blocking, try_join};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument};
 use tracing_appender::non_blocking::WorkerGuard;
@@ -358,10 +358,11 @@ async fn run_servers(
     let cancellation_token = CancellationToken::new();
     tokio::spawn(shutdown_signal(cancellation_token.clone()));
 
+    let (ready_sender, ready_receiver) = oneshot::channel();
     let child_token = cancellation_token.child_token();
     let http_server = async {
         info!("starting HTTP server");
-        tokio::spawn(http_server.run(child_token.cancelled_owned()))
+        tokio::spawn(http_server.run(ready_sender, child_token.cancelled_owned()))
             .await
             .wrap_err("HTTP server panicked")?
             .wrap_err("error with HTTP server")
@@ -378,6 +379,18 @@ async fn run_servers(
             Ok(())
         }
     };
+
+    #[cfg(unix)]
+    spawn_blocking(|| {
+        if sd_notify::booted().unwrap_or_default()
+            && ready_receiver.blocking_recv().is_ok()
+            && let Err(error) = sd_notify::notify(&[sd_notify::NotifyState::Ready])
+        {
+            tracing::warn!(%error, "error sending ready notification to systemd");
+        }
+    });
+    #[cfg(not(unix))]
+    drop(ready_receiver);
 
     try_join!(http_server, admin_server)?;
 
@@ -405,7 +418,19 @@ async fn shutdown_signal(cancellation_token: CancellationToken) {
         _ = terminate.recv() => info!("SIGTERM received, shutting down..."),
     }
 
+    #[cfg(unix)]
+    let sd_notify = spawn_blocking(|| {
+        if sd_notify::booted().unwrap_or_default()
+            && let Err(error) = sd_notify::notify(&[sd_notify::NotifyState::Stopping])
+        {
+            tracing::warn!(%error, "error sending stopping notification to systemd");
+        }
+    });
+
     cancellation_token.cancel();
+
+    #[cfg(unix)]
+    sd_notify.await.expect("sd_notify panicked");
 }
 
 /// Communicate with the admin socket.
