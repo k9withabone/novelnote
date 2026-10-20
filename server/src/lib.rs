@@ -13,7 +13,7 @@ use std::{
 use axum::{Router, http::StatusCode};
 use novelnote_database::Database;
 use thiserror::Error;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::oneshot};
 use tower_http::{services::ServeDir, timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{info, instrument};
 use tracing_error::TracedError;
@@ -36,7 +36,9 @@ pub struct Server {
 }
 
 impl Server {
-    /// Start the NovelNote HTTP server, binding to the configured [`SocketAddr`].
+    /// Start the NovelNote HTTP server, binding to the configured [`BindAddress`].
+    ///
+    /// A message will be sent with `ready_sender` when the server is ready to receive requests.
     ///
     /// The server will gracefully shut down when the `shutdown_signal` future completes.
     ///
@@ -51,7 +53,11 @@ impl Server {
             asset_directory = %self.asset_directory.display(),
         ),
     )]
-    pub async fn run<F>(self, shutdown_signal: F) -> Result<(), TracedError<ServerError>>
+    pub async fn run<F>(
+        self,
+        ready_sender: oneshot::Sender<()>,
+        shutdown_signal: F,
+    ) -> Result<(), TracedError<ServerError>>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -89,6 +95,8 @@ impl Server {
 
                 let serve = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal);
                 info!("listening on {address}");
+                #[expect(unused_must_use, reason = "ok if readiness message is not received")]
+                ready_sender.send(());
                 serve
                     .await
                     .map_err(|source| ServerError::Listen { source })?;
@@ -126,6 +134,8 @@ impl Server {
 
                 let serve = axum::serve(listener, router).with_graceful_shutdown(shutdown_signal);
                 info!("listening at `{}`", path.display());
+                #[expect(unused_must_use, reason = "ok if readiness message is not received")]
+                ready_sender.send(());
                 serve
                     .await
                     .map_err(|source| ServerError::Listen { source })?;
