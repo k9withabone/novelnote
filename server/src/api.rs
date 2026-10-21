@@ -38,7 +38,7 @@ pub(crate) fn router() -> Router<Database> {
 
     router
         .route("/openapi.json", get(Json(openapi.clone())))
-        .merge(Redoc::with_url("/redoc", openapi))
+        .merge(Redoc::with_url("/redoc", openapi).custom_html(include_str!("api/redoc.html")))
 }
 
 /// API documentation.
