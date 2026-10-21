@@ -1,5 +1,5 @@
 [workspace]
-members = ["admin", "core", "database", "server", "web"]
+members = ["admin", "client", "core", "database", "server", "web"]
 resolver = "3"
 
 [workspace.package]
@@ -122,6 +122,7 @@ verbose_file_reads = "warn"
 
 [workspace.dependencies]
 jiff = { version = "0.2.22", features = ["logging", "serde"] }
+mime = "0.3.17"
 novelnote_admin = { version = "0.1.0-alpha.1", path = "admin" }
 novelnote_core = { version = "0.1.0-alpha.1", path = "core" }
 novelnote_database = { version = "0.1.0-alpha.2", path = "database" }
@@ -141,6 +142,11 @@ uuid = { version = "1.26.1", features = ["serde"] }
 version = "0.11.23"
 default-features = false
 features = ["serde", "tracing"]
+
+[workspace.dependencies.reqwest]
+version = "0.13.5"
+default-features = false
+features = ["charset", "query", "json"]
 
 [workspace.dependencies.rkyv]
 version = "0.8.15"

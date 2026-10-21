@@ -87,6 +87,7 @@ Development of NovelNote is separated into several packages.
 | [`novelnote_database`](./database) | The database library. Provides the interface with the SQLite database. |
 | [`novelnote_admin`](./admin) | Admin server and client library. Provides interface for admin commands e.g. backups and password resets. |
 | [`novelnote_web`](./web) | Web frontend WASM binary. Served by the HTTP server. |
+| [`novelnote_client`](./client) | HTTP API client library. |
 
 ## License
 

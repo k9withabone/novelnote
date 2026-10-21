@@ -16,7 +16,7 @@ workspace = true
 [dependencies]
 axum = "0.8.8"
 itertools = "0.14"
-mime = "0.3.17"
+mime.workspace = true
 novelnote_core = { workspace = true, features = ["utoipa"] }
 novelnote_database.workspace = true
 rkyv.workspace = true

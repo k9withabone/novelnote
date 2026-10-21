@@ -1,0 +1,26 @@
+[package]
+name = "novelnote_client"
+version = "0.1.0-alpha.1"
+description = "HTTP API client for Novelnote, a self-hosted book tracker"
+categories = ["api-bindings"]
+authors.workspace = true
+edition.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mime.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+novelnote_database.workspace = true
+novelnote_server.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "rt"] }
+tokio-util.workspace = true
