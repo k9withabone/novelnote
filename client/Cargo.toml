@@ -14,8 +14,11 @@ keywords.workspace = true
 workspace = true
 
 [dependencies]
+futures-util = { version = "0.3.34", default-features = false }
 mime.workspace = true
-reqwest.workspace = true
+novelnote_core.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
+rkyv.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
