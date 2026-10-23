@@ -3,11 +3,10 @@
 use std::{future::Ready, num::ParseIntError, str::FromStr};
 
 use axum::{
-    Form, Json,
-    body::Bytes,
+    Form, Json, RequestExt,
     extract::{
         FromRequest, FromRequestParts, Request,
-        rejection::{BytesRejection, FormRejection, JsonRejection},
+        rejection::{FormRejection, JsonRejection},
     },
     http::{
         HeaderName, StatusCode,
@@ -16,6 +15,7 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
+use http_body_util::LengthLimitError;
 use itertools::{FoldWhile, Itertools};
 use mime::Mime;
 use rkyv::{
@@ -25,9 +25,11 @@ use rkyv::{
     de::Pool,
     rancor::{self, Strategy},
     ser::allocator::ArenaHandle,
+    util::AlignedVec,
 };
 use serde::de::DeserializeOwned;
 use thiserror::Error;
+use tokio_stream::{Stream, StreamExt};
 use tracing::error;
 
 /// Extractor for deserializing a request's body from a supported [`MediaType`].
@@ -426,6 +428,7 @@ pub(super) enum QualityValueParseError {
 }
 
 /// [`rkyv`] extractor and response.
+#[derive(Debug)]
 pub(super) struct Rkyv<T>(T);
 
 impl<T, S> FromRequest<S> for Rkyv<T>
@@ -437,14 +440,23 @@ where
 {
     type Rejection = RkyvRejection;
 
-    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: Request, _state: &S) -> Result<Self, Self::Rejection> {
         if req
             .headers()
             .get(CONTENT_TYPE)
             .is_some_and(|value| value == MediaType::RKYV)
         {
-            let bytes = Bytes::from_request(req, state).await?;
-            Ok(Self(rkyv::from_bytes(&bytes)?))
+            let mut stream = req.into_limited_body().into_data_stream();
+
+            let (min, max) = Stream::size_hint(&stream);
+            let capacity = max.unwrap_or(min);
+            let mut buf = AlignedVec::<1024>::with_capacity(capacity);
+
+            while let Some(bytes) = stream.try_next().await? {
+                buf.extend_from_slice(&bytes);
+            }
+
+            Ok(Self(rkyv::from_bytes(&buf)?))
         } else {
             Err(RkyvRejection::MissingRkyvContentType)
         }
@@ -475,20 +487,43 @@ pub(super) enum RkyvRejection {
     #[error("expected request with `Content-Type: application/rkyv`")]
     MissingRkyvContentType,
 
-    /// Error using [`Bytes`] extractor.
-    #[error("error getting bytes from body")]
-    BytesRejection(#[from] BytesRejection),
+    /// Request body was too large.
+    #[error("failed to buffer the request body")]
+    LengthLimitError(#[from] LengthLimitError),
+
+    /// Unknown error while buffering the body.
+    #[error("failed to buffer the request body")]
+    UnknownBodyError(axum::Error),
 
     /// Error deserializing target type.
     #[error("error deserializing rkyv body into the target type")]
     RkyvError(#[from] rancor::BoxedError),
 }
 
+impl From<axum::Error> for RkyvRejection {
+    fn from(error: axum::Error) -> Self {
+        error
+            .into_inner()
+            .downcast::<axum::Error>()
+            .map_or_else(|error| error, |error| error.into_inner())
+            .downcast::<LengthLimitError>()
+            .map_or_else(
+                |error| Self::UnknownBodyError(axum::Error::new(error)),
+                |error| (*error).into(),
+            )
+    }
+}
+
 impl IntoResponse for RkyvRejection {
     fn into_response(self) -> Response {
         match &self {
             Self::MissingRkyvContentType => (StatusCode::UNSUPPORTED_MEDIA_TYPE, self.to_string()),
-            Self::BytesRejection(source) => (source.status(), format!("{self}: {source}")),
+            Self::LengthLimitError(source) => {
+                (StatusCode::PAYLOAD_TOO_LARGE, format!("{self}: {source}"))
+            }
+            Self::UnknownBodyError(source) => {
+                (StatusCode::BAD_REQUEST, format!("{self}: {source}"))
+            }
             Self::RkyvError(source) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 format!("{self}: {source}"),
@@ -703,6 +738,30 @@ mod tests {
                     expected,
                 );
             }
+        }
+    }
+
+    mod rkyv {
+        use axum::{body::Body, extract::DefaultBodyLimit, handler::Handler, http};
+
+        use super::*;
+
+        #[tokio::test]
+        async fn length_limit_err() -> Result<(), http::Error> {
+            const LENGTH_LIMIT: usize = 64;
+
+            let handler = |body: Result<Rkyv<()>, RkyvRejection>| std::future::ready(body);
+            let handler = handler.layer(DefaultBodyLimit::max(LENGTH_LIMIT));
+
+            let request = Request::builder()
+                .header(CONTENT_TYPE, MediaType::RKYV)
+                .body(Body::from(vec![0; LENGTH_LIMIT + 1]))?;
+
+            let response = handler.call(request, ()).await;
+
+            assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+            Ok(())
         }
     }
 }

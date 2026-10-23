@@ -15,6 +15,7 @@ workspace = true
 
 [dependencies]
 axum = "0.8.8"
+http-body-util = "0.1.5"
 itertools = "0.14"
 mime.workspace = true
 novelnote_core = { workspace = true, features = ["utoipa"] }
@@ -23,6 +24,7 @@ rkyv.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "net", "sync"] }
+tokio-stream.workspace = true
 tower-http = { version = "0.7.1", features = ["fs", "timeout", "trace"] }
 tracing.workspace = true
 tracing-error.workspace = true

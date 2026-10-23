@@ -21,7 +21,7 @@ novelnote_database.workspace = true
 rkyv.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "sync"] }
-tokio-stream = { version = "0.1.18", default-features = false }
+tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec", "time"] }
 tracing.workspace = true
 tracing-error.workspace = true

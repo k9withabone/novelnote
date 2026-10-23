@@ -1877,6 +1877,7 @@ name = "novelnote_server"
 version = "0.1.0-alpha.6"
 dependencies = [
  "axum",
+ "http-body-util",
  "itertools",
  "mime",
  "novelnote_core",
@@ -1886,6 +1887,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-stream",
  "tower-http 0.7.1",
  "tracing",
  "tracing-error",
