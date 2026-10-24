@@ -60,3 +60,31 @@ enum EmailAddress {
     Unverified(lettre::Address),
 }
 ```
+
+## sessions
+
+| Column     | SQLite Type                                            | Rust Type                            |
+| ---------- | ------------------------------------------------------ | ------------------------------------ |
+| id         | BLOB PRIMARY KEY                                       | `Uuid`                               |
+| user_id    | BLOB NOT NULL REFERENCES users(id) ON DELETE CASCADE   | `Uuid`                               |
+| ip_address | TEXT                                                   | `Option<IpAddr>`                     |
+| user_agent | TEXT                                                   | `Option<String>`                     |
+| started    | INTEGER NOT NULL DEFAULT (unixepoch('now'))            | `jiff::Timestamp` as rounded seconds |
+| expires    | INTEGER NOT NULL DEFAULT (unixepoch('now', '2 hours')) | `jiff::Timestamp` as rounded seconds |
+
+`ip_address`, `user_agent`, and `expires` is refreshed whenever the session is used.
+
+Ensure the session expires after it started:
+```sql
+CHECK (expires > started)
+```
+
+View of unexpired sessions:
+```sql
+CREATE VIEW valid_sessions AS SELECT * FROM sessions WHERE expires > unixepoch('now');
+```
+
+Periodically remove expired sessions:
+```sql
+DELETE FROM user_sessions WHERE expires <= unixepoch('now');
+```
