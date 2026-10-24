@@ -1829,10 +1829,13 @@ dependencies = [
 name = "novelnote_client"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "futures-util",
  "mime",
+ "novelnote_core",
  "novelnote_database",
  "novelnote_server",
  "reqwest",
+ "rkyv",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -2394,6 +2397,7 @@ dependencies = [
  "bytes",
  "encoding_rs",
  "futures-core",
+ "futures-util",
  "http",
  "http-body",
  "http-body-util",
@@ -2409,12 +2413,14 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
+ "tokio-util",
  "tower",
  "tower-http 0.6.11",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
 ]
 

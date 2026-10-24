@@ -1,18 +1,34 @@
 //! `novelnote_client` provides [`Client`] for communicating with the HTTP API of NovelNote, a
 //! self-hosted book tracker.
 
+pub mod auth;
+
 use std::{
     fmt::{self, Display, Formatter},
     sync::Arc,
 };
 
+use futures_util::{Stream, TryStreamExt};
 use mime::Mime;
 pub use reqwest::{self, Url};
 use reqwest::{
     Response, StatusCode,
-    header::{CONTENT_TYPE, HeaderValue},
+    header::{ACCEPT, CONTENT_TYPE, HeaderValue},
+};
+use rkyv::{
+    Archive, Deserialize, Serialize,
+    api::high::{HighDeserializer, HighSerializer, HighValidator, to_bytes_in},
+    bytecheck::CheckBytes,
+    rancor,
+    ser::allocator::ArenaHandle,
+    util::AlignedVec,
 };
 use thiserror::Error;
+
+pub use crate::auth::Auth;
+
+/// Media type for [`rkyv`] values.
+const RKYV: HeaderValue = HeaderValue::from_static("application/rkyv");
 
 /// NovelNote HTTP API client.
 ///
@@ -41,6 +57,8 @@ impl Client {
 
     /// Check if the server is healthy and responding.
     ///
+    /// Sends a `GET` request to `/api/health-check`.
+    ///
     /// # Errors
     ///
     /// Returns an error if the request cannot be sent or the server responds with an error or
@@ -55,6 +73,12 @@ impl Client {
         }
     }
 
+    /// `/api/auth` routes.
+    #[must_use]
+    pub const fn auth(&self) -> Auth<'_> {
+        Auth { client: self }
+    }
+
     /// Send a `GET` request to the `path`.
     ///
     /// # Errors
@@ -65,7 +89,37 @@ impl Client {
     ///
     /// Panics if the `path` is not a valid URL when joined with the `base_url`.
     async fn get(&self, path: &str) -> Result<Response, reqwest::Error> {
-        self.client.get(self.url(path)).send().await
+        self.client
+            .get(self.url(path))
+            .header(ACCEPT, RKYV)
+            .send()
+            .await
+    }
+
+    /// Send a `POST` request with a body to the `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the body fails to serialize or the request cannot be sent.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `path` is not a valid URL when joined with the `base_url`.
+    async fn post_body<T>(&self, path: &str, body: &T) -> Result<Response, PostError>
+    where
+        T: for<'a> Serialize<HighSerializer<Vec<u8>, ArenaHandle<'a>, rancor::BoxedError>> + Sync,
+    {
+        let bytes = to_bytes_in(body, Vec::new())
+            .map_err(|error| PostError::Serialize(error.to_string()))?;
+
+        self.client
+            .post(self.url(path))
+            .header(ACCEPT, RKYV)
+            .header(CONTENT_TYPE, RKYV)
+            .body(bytes)
+            .send()
+            .await
+            .map_err(Into::into)
     }
 
     /// Create a [`Url`] by joining the `path` to the `base_url` of the server.
@@ -114,17 +168,7 @@ impl UnexpectedError {
     async fn new(response: Response) -> Self {
         let status = response.status();
 
-        let content_type = response
-            .headers()
-            .get(CONTENT_TYPE)
-            .map(HeaderValue::to_str)
-            .and_then(Result::ok)
-            .map(str::parse::<Mime>)
-            .and_then(Result::ok);
-
-        let message = if let Some(content_type) = content_type
-            && content_type.essence_str() == "text/plain"
-        {
+        let message = if response.is_text() {
             response.text().await.ok()
         } else {
             None
@@ -148,6 +192,89 @@ impl Display for UnexpectedError {
     }
 }
 
+/// Error returned when sending a POST request fails.
+#[derive(Error, Debug)]
+pub enum PostError {
+    /// Error serializing request body.
+    #[error("error serializing request body: {0}")]
+    Serialize(String),
+
+    /// Error sending request.
+    #[error("error sending request")]
+    Send(#[from] reqwest::Error),
+}
+
+/// Extension trait for [`Response`].
+trait ResponseExt {
+    /// Returns `true` if the `Content-Type` header is set to `application/rkyv`.
+    fn is_rkyv(&self) -> bool;
+
+    /// Returns `true` if the `Content-Type` header's "essence" is `text/plain`.
+    fn is_text(&self) -> bool;
+
+    /// Try to deserialize the response body with [`rkyv`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the response's body cannot be read or it cannot be deserialized into the
+    /// target type.
+    async fn rkyv<T>(self) -> Result<T, DeserializeError>
+    where
+        T: Archive,
+        T::Archived: for<'a> CheckBytes<HighValidator<'a, rancor::BoxedError>>
+            + Deserialize<T, HighDeserializer<rancor::BoxedError>>;
+}
+
+impl ResponseExt for Response {
+    fn is_rkyv(&self) -> bool {
+        self.headers()
+            .get(CONTENT_TYPE)
+            .map_or_default(|content_type| *content_type == RKYV)
+    }
+
+    fn is_text(&self) -> bool {
+        self.headers()
+            .get(CONTENT_TYPE)
+            .map(HeaderValue::to_str)
+            .and_then(Result::ok)
+            .map(str::parse::<Mime>)
+            .and_then(Result::ok)
+            .map_or_default(|mime| mime.essence_str() == "text/plain")
+    }
+
+    async fn rkyv<T>(self) -> Result<T, DeserializeError>
+    where
+        T: Archive,
+        T::Archived: for<'a> CheckBytes<HighValidator<'a, rancor::BoxedError>>
+            + Deserialize<T, HighDeserializer<rancor::BoxedError>>,
+    {
+        let mut stream = self.bytes_stream();
+
+        let (min, max) = stream.size_hint();
+        let capacity = max.unwrap_or(min);
+        let mut buf = AlignedVec::<1024>::with_capacity(capacity);
+
+        while let Some(bytes) = stream.try_next().await? {
+            buf.extend_from_slice(&bytes);
+        }
+
+        rkyv::from_bytes::<T, rancor::BoxedError>(&buf)
+            .map_err(|error| DeserializeError::Rkyv(error.to_string()))
+    }
+}
+
+/// Error returned when deserializing a response body fails.
+#[derive(Error, Debug)]
+pub enum DeserializeError {
+    /// Error buffering the response body.
+    #[error("error buffering the response body")]
+    Body(#[from] reqwest::Error),
+
+    /// Error deserializing the [`rkyv`] response body into the target type.
+    #[error("error deserializing rkyv response body into target type: {0}")]
+    Rkyv(String),
+}
+
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
@@ -166,15 +293,14 @@ mod tests {
 
     /// Bind a [`Server`] to a Unix domain socket at `path` in a temporary directory, connect a
     /// [`Client`] to it, and execute the closure.
-    pub(crate) async fn with_client<P, F, E>(
+    pub(crate) async fn with_client<P, F, T>(
         path: P,
         database: Database,
         f: F,
-    ) -> Result<(), Box<dyn Error>>
+    ) -> Result<T, Box<dyn Error>>
     where
         P: AsRef<Path>,
-        F: AsyncFnOnce(Client) -> Result<(), E>,
-        E: Into<Box<dyn Error>>,
+        F: AsyncFnOnce(Client) -> T,
     {
         let temp_dir = TempDir::new()?;
         let path = temp_dir.path().join(path).with_extension("socket");
@@ -195,13 +321,13 @@ mod tests {
         let client = reqwest::Client::builder().unix_socket(path).build()?;
         let client = Client::new(client, "http://example.com".parse()?);
         ready_receiver.await?;
-        f(client).await.map_err(Into::into)?;
+        let response = f(client).await;
 
         cancellation_token.cancel();
         server.await??;
         temp_dir.close()?;
 
-        Ok(())
+        Ok(response)
     }
 
     #[tokio::test]
@@ -211,6 +337,7 @@ mod tests {
             Database::open_in_memory(1).await?,
             async |client| client.health_check().await,
         )
-        .await
+        .await?
+        .map_err(Into::into)
     }
 }
