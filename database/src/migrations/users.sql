@@ -19,5 +19,5 @@ CREATE TABLE users(
 CREATE TRIGGER user_email_verified BEFORE UPDATE OF email ON users
     WHEN new.email != old.email OR new.email IS NULL
 BEGIN
-    UPDATE test SET email_verified = 0 WHERE rowid = old.rowid;
+    UPDATE users SET email_verified = 0 WHERE rowid = old.rowid;
 END;
