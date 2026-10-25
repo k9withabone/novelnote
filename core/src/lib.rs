@@ -8,6 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod rkyv_with;
+mod serde_with;
 pub mod user;
 
 use std::{
@@ -17,6 +18,7 @@ use std::{
     str::FromStr,
 };
 
+use jiff::{Timestamp, Unit};
 use rkyv::{
     bytecheck::Verify,
     rancor::{Fallible, Source},
@@ -464,6 +466,34 @@ impl PartialOrd<ArchivedName> for Cow<'_, str> {
     fn partial_cmp(&self, other: &ArchivedName) -> Option<Ordering> {
         self.as_ref().partial_cmp(other.as_str())
     }
+}
+
+/// Extension trait for [`Timestamp`].
+///
+/// This trait is sealed.
+#[expect(private_bounds, reason = "sealed trait")]
+pub trait TimestampExt: private::Sealed {
+    /// Returns this timestamp as a rounded number of seconds since the Unix epoch.
+    #[expect(clippy::wrong_self_convention, reason = "Timestamp is Copy")]
+    fn as_rounded_second(self) -> i64;
+}
+
+impl TimestampExt for Timestamp {
+    fn as_rounded_second(self) -> i64 {
+        self.round(Unit::Second)
+            .expect("round to nearest second cleanly")
+            .as_second()
+    }
+}
+
+/// Private sealed trait for [`TimestampExt`].
+mod private {
+    use jiff::Timestamp;
+
+    /// Private.
+    pub(crate) trait Sealed {}
+
+    impl Sealed for Timestamp {}
 }
 
 #[cfg(test)]

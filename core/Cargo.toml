@@ -21,6 +21,7 @@ utoipa = ["dep:utoipa"]
 
 [dependencies]
 email_address = { version = "0.2.9", default-features = false }
+jiff.workspace = true
 lettre.workspace = true
 rkyv = { workspace = true, features = ["uuid-1"] }
 serde.workspace = true

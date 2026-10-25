@@ -1847,6 +1847,7 @@ name = "novelnote_core"
 version = "0.1.0-alpha.1"
 dependencies = [
  "email_address",
+ "jiff",
  "lettre",
  "proptest",
  "proptest-derive",

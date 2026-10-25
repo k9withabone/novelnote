@@ -8,16 +8,19 @@ use std::{
 };
 
 use email_address::EmailAddress;
+use jiff::Timestamp;
 use rkyv::{
     Archive, Deserialize, Place, Portable, SerializeUnsized,
     bytecheck::{CheckBytes, Verify},
     munge::munge,
-    primitive::ArchivedUsize,
+    primitive::{ArchivedI64, ArchivedUsize},
     rancor::{Fallible, Source},
     string::{ArchivedString, StringResolver},
     with::{ArchiveWith, DeserializeWith, SerializeWith},
 };
 use thiserror::Error;
+
+use crate::TimestampExt;
 
 /// A wrapper that archives a type to [`ArchivedString`].
 ///
@@ -396,15 +399,45 @@ impl Hash for ArchivedLettreAddress {
     }
 }
 
+/// A wrapper that archives [`Timestamp`] as rounded seconds.
+pub(crate) struct TimestampRoundedSecond;
+
+impl ArchiveWith<Timestamp> for TimestampRoundedSecond {
+    type Archived = ArchivedI64;
+    type Resolver = ();
+
+    fn resolve_with(field: &Timestamp, (): Self::Resolver, out: Place<Self::Archived>) {
+        field.as_rounded_second().resolve((), out);
+    }
+}
+
+impl<S: Fallible + ?Sized> SerializeWith<Timestamp, S> for TimestampRoundedSecond {
+    fn serialize_with(_field: &Timestamp, _serializer: &mut S) -> Result<Self::Resolver, S::Error> {
+        Ok(())
+    }
+}
+
+impl<D> DeserializeWith<ArchivedI64, Timestamp, D> for TimestampRoundedSecond
+where
+    D: Fallible + ?Sized,
+    D::Error: Source,
+{
+    fn deserialize_with(field: &ArchivedI64, _deserializer: &mut D) -> Result<Timestamp, D::Error> {
+        Timestamp::from_second(field.to_native()).map_err(Source::new)
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
+    use proptest::{prop_assert_eq, proptest, strategy::Strategy};
+    use rkyv::{Serialize, rancor};
+
     use super::*;
 
     pub(crate) mod lettre_address {
         use std::hint::black_box;
 
-        use proptest::{prop_assert_eq, proptest, strategy::Strategy, string::string_regex};
-        use rkyv::{Serialize, rancor};
+        use proptest::string::string_regex;
 
         use super::*;
 
@@ -469,6 +502,42 @@ pub(crate) mod tests {
             rkyv::access::<ArchivedTest, rancor::Error>(&bytes).expect_err("invalid domain");
 
             Ok(())
+        }
+    }
+
+    mod timestamp {
+        use super::*;
+
+        /// [`Strategy`] for creating a [`Timestamp`].
+        fn strategy() -> impl Strategy<Value = Timestamp> {
+            let min_second = Timestamp::MIN.as_second();
+            let max_second = Timestamp::MAX.as_second();
+            (min_second..=max_second, -999_999_999..=999_999_999_i32).prop_map(
+                move |(second, mut nanosecond)| {
+                    if second == min_second {
+                        nanosecond = nanosecond.max(0_i32);
+                    }
+                    Timestamp::new(second, nanosecond).expect("valid Timestamp")
+                },
+            )
+        }
+
+        #[derive(Archive, Serialize, Deserialize, Debug, PartialEq, Eq)]
+        #[rkyv(derive(Debug))]
+        struct Test {
+            #[rkyv(with = TimestampRoundedSecond)]
+            timestamp: Timestamp,
+        }
+
+        proptest! {
+            #[test]
+            fn round_trip(timestamp in strategy()) {
+                let timestamp = timestamp.round(jiff::Unit::Second).expect("clean rounding");
+                let test = Test { timestamp };
+
+                let bytes = rkyv::to_bytes::<rancor::Error>(&test)?;
+                prop_assert_eq!(rkyv::from_bytes::<Test, rancor::Error>(&bytes)?, test);
+            }
         }
     }
 }
