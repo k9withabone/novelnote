@@ -86,5 +86,5 @@ CREATE VIEW valid_sessions AS SELECT * FROM sessions WHERE expires > unixepoch('
 
 Periodically remove expired sessions:
 ```sql
-DELETE FROM user_sessions WHERE expires <= unixepoch('now');
+DELETE FROM sessions WHERE expires <= unixepoch('now');
 ```

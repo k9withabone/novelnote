@@ -1,6 +1,7 @@
 //! `novelnote_database` provides the SQLite [`Database`] interface for NovelNote, a self-hosted
 //! book tracker.
 
+pub mod sessions;
 pub mod users;
 
 use std::{
@@ -12,7 +13,10 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use rusqlite::{OptionalExtension, Params, Row, types::Type};
+use itertools::Itertools;
+use rusqlite::{
+    CachedStatement, OptionalExtension, Params, Row, Statement, Transaction, types::Type,
+};
 use rusqlite_migration::{M, Migrations};
 use thiserror::Error;
 use tokio::{
@@ -26,11 +30,15 @@ use tracing::{debug, instrument, trace, trace_span};
 use tracing_error::SpanTrace;
 use uuid::Uuid;
 
-pub use crate::users::Users;
+pub use crate::{sessions::Sessions, users::Users};
 
 /// Slice of database schema migrations.
-const MIGRATIONS_SLICE: &[M] = &[M::up(include_str!("migrations/users.sql"))
-    .down("DROP TRIGGER user_email_verified; DROP TABLE users;")];
+const MIGRATIONS_SLICE: &[M] = &[
+    M::up(include_str!("migrations/users.sql"))
+        .down("DROP TRIGGER user_email_verified; DROP TABLE users;"),
+    M::up(include_str!("migrations/sessions.sql"))
+        .down("DROP VIEW valid_sessions; DROP TABLE sessions;"),
+];
 
 /// Database schema migrations.
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATIONS_SLICE);
@@ -128,6 +136,12 @@ impl Database {
         Users { database: self }
     }
 
+    /// Interact with the `sessions` table.
+    #[must_use]
+    pub const fn sessions(&self) -> Sessions<'_> {
+        Sessions { database: self }
+    }
+
     /// Execute a single SQL statement.
     ///
     /// # Errors
@@ -138,6 +152,27 @@ impl Database {
         P: AsParams + Send + 'static,
     {
         self.call(move |connection| connection.execute(sql, params.as_params()).map(|_| ()))
+            .await?
+            .map_err(ExecuteError::from_rusqlite)
+    }
+
+    /// Execute a SQL query that returns multiple rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database is closed or SQLite returned an error.
+    async fn query<P, F, T>(
+        &self,
+        sql: &'static str,
+        params: P,
+        map_fn: F,
+    ) -> Result<Vec<T>, ExecuteError>
+    where
+        P: AsParams + Send + 'static,
+        F: FnMut(&Row<'_>) -> Result<T, rusqlite::Error> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.call(move |connection| connection.query(sql, params, map_fn))
             .await?
             .map_err(ExecuteError::from_rusqlite)
     }
@@ -159,11 +194,29 @@ impl Database {
         F: FnOnce(&Row<'_>) -> Result<T, rusqlite::Error> + Send + 'static,
         T: Send + 'static,
     {
-        self.call(move |connection| {
-            connection
-                .prepare_cached(sql)?
-                .query_one(params.as_params(), map_fn)
-                .optional()
+        self.call(move |connection| connection.query_one_cached(sql, params, map_fn))
+            .await?
+            .map_err(ExecuteError::from_rusqlite)
+    }
+
+    /// Execute a database transaction.
+    ///
+    /// The transaction is committed if the given function is successful.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database is closed, the transaction failed, or SQLite returned an
+    /// error.
+    async fn transaction<F, T>(&self, f: F) -> Result<T, ExecuteError>
+    where
+        F: FnOnce(&mut Transaction) -> Result<T, rusqlite::Error> + Send + 'static,
+        T: Send + 'static + Default,
+    {
+        self.call(|connection| {
+            let mut transaction = connection.transaction()?;
+            let result = f(&mut transaction)?;
+            transaction.commit()?;
+            Ok(result)
         })
         .await?
         .map_err(ExecuteError::from_rusqlite)
@@ -342,10 +395,85 @@ impl From<oneshot::error::RecvError> for ConnectionClosed {
     }
 }
 
+/// Extension trait for [`rusqlite::Connection`].
+trait RusqliteConnectionExt {
+    /// Prepare a SQL statement for executing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite does.
+    fn prepare(&self, sql: &str) -> Result<Statement<'_>, rusqlite::Error>;
+
+    /// Prepare a cached SQL statement for executing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite does.
+    fn prepare_cached(&self, sql: &str) -> Result<CachedStatement<'_>, rusqlite::Error>;
+
+    /// Execute a cached SQL statement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if binding the parameters fails, the executed statement returns rows, or SQLite
+    /// returns an error.
+    fn execute_cached(&self, sql: &str, params: impl AsParams) -> Result<(), rusqlite::Error> {
+        self.prepare_cached(sql)?
+            .execute(params.as_params())
+            .map(|_| ())
+    }
+
+    /// Execute a SQL query that returns multiple rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if binding the parameters fails or SQLite returned an error.
+    fn query<T>(
+        &self,
+        sql: &str,
+        params: impl AsParams,
+        map_fn: impl FnMut(&Row<'_>) -> Result<T, rusqlite::Error>,
+    ) -> Result<Vec<T>, rusqlite::Error> {
+        self.prepare(sql)?
+            .query_map(params.as_params(), map_fn)?
+            .try_collect()
+    }
+
+    /// Execute a cached SQL query that is expected to return a single row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if SQLite returned an error or more than one row was returned.
+    fn query_one_cached<T>(
+        &self,
+        sql: &str,
+        params: impl AsParams,
+        map_fn: impl FnOnce(&Row<'_>) -> Result<T, rusqlite::Error>,
+    ) -> Result<Option<T>, rusqlite::Error> {
+        self.prepare_cached(sql)?
+            .query_one(params.as_params(), map_fn)
+            .optional()
+    }
+}
+
+impl RusqliteConnectionExt for rusqlite::Connection {
+    fn prepare(&self, sql: &str) -> Result<Statement<'_>, rusqlite::Error> {
+        Self::prepare(self, sql)
+    }
+
+    fn prepare_cached(&self, sql: &str) -> Result<CachedStatement<'_>, rusqlite::Error> {
+        Self::prepare_cached(self, sql)
+    }
+}
+
 /// Convert a type into parameters for a SQL statement.
 trait AsParams {
     /// Convert this value into SQL statement/query parameters.
     fn as_params(&self) -> impl Params;
+}
+
+impl AsParams for () {
+    fn as_params(&self) -> impl Params {}
 }
 
 impl AsParams for String {

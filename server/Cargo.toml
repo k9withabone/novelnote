@@ -16,7 +16,7 @@ workspace = true
 [dependencies]
 axum = "0.8.8"
 http-body-util = "0.1.5"
-itertools = "0.14"
+itertools.workspace = true
 mime.workspace = true
 novelnote_core = { workspace = true, features = ["utoipa"] }
 novelnote_database.workspace = true

@@ -1387,10 +1387,12 @@ dependencies = [
  "jiff-core",
  "jiff-static",
  "jiff-tzdb-platform",
+ "js-sys",
  "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1865,6 +1867,8 @@ dependencies = [
 name = "novelnote_database"
 version = "0.1.0-alpha.2"
 dependencies = [
+ "itertools",
+ "jiff",
  "novelnote_core",
  "rusqlite",
  "rusqlite_migration",
@@ -2490,6 +2494,7 @@ dependencies = [
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
+ "jiff",
  "libsqlite3-sys",
  "smallvec",
  "sqlite-wasm-rs",

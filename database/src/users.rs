@@ -41,7 +41,7 @@ impl Users<'_> {
     ///
     /// Returns an error if the database is closed or SQLite returned an error.
     #[instrument(level = "trace", skip(self))]
-    pub async fn get_by_id(&self, id: Uuid) -> Result<Option<User>, ExecuteError> {
+    pub async fn by_id(&self, id: Uuid) -> Result<Option<User>, ExecuteError> {
         self.database
             .query_one_cached(
                 "SELECT username, email, email_verified, display_name FROM users WHERE id = ?1",
@@ -69,6 +69,18 @@ impl Users<'_> {
                     })
                 },
             )
+            .await
+    }
+
+    /// Delete a user from the database.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database is closed or SQLite returned an error.
+    #[instrument(level = "trace", skip(self))]
+    pub async fn delete(&self, id: Uuid) -> Result<(), ExecuteError> {
+        self.database
+            .execute("DELETE FROM users WHERE id = ?1", id)
             .await
     }
 }
@@ -128,8 +140,9 @@ mod tests {
     async fn round_trip() -> Result<(), Box<dyn Error>> {
         let database = Database::open_in_memory(1).await?;
 
+        let id = Uuid::nil();
         let user = User {
-            id: Uuid::nil(),
+            id,
             username: Username::new("test")?,
             email: Some(EmailAddress::Verified("test@example.com".parse()?)),
             display_name: Some(Name::new("test")?),
@@ -140,7 +153,10 @@ mod tests {
             .users()
             .insert(user.clone(), authentication)
             .await?;
-        assert_eq!(database.users().get_by_id(user.id).await?, Some(user));
+        assert_eq!(database.users().by_id(id).await?, Some(user));
+
+        database.users().delete(id).await?;
+        assert_eq!(database.users().by_id(id).await?, None);
 
         Ok(())
     }
