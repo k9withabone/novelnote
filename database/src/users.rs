@@ -1,6 +1,6 @@
 //! Methods for interacting with the `users` table.
 
-use novelnote_core::{Name, User, user::EmailAddress};
+use novelnote_core::{Name, User};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -44,28 +44,13 @@ impl Users<'_> {
     pub async fn by_id(&self, id: Uuid) -> Result<Option<User>, ExecuteError> {
         self.database
             .query_one_cached(
-                "SELECT username, email, email_verified, display_name FROM users WHERE id = ?1",
+                "SELECT username, display_name FROM users WHERE id = ?1",
                 id,
                 move |row| {
-                    let username = row.parse_str(0)?;
-
-                    let email = row.parse_str_or_none(1)?;
-                    let email_verified = row.get(2)?;
-                    let email = email.map(|email| {
-                        if email_verified {
-                            EmailAddress::Verified(email)
-                        } else {
-                            EmailAddress::Unverified(email)
-                        }
-                    });
-
-                    let display_name = row.parse_str_or_none(3)?;
-
                     Ok(User {
                         id,
-                        username,
-                        email,
-                        display_name,
+                        username: row.parse_str(0)?,
+                        display_name: row.parse_str_or_none(1)?,
                     })
                 },
             )
@@ -101,7 +86,6 @@ impl AsParams for (User, Authentication) {
             User {
                 id,
                 username,
-                email,
                 display_name,
             },
             authentication,
@@ -112,17 +96,13 @@ impl AsParams for (User, Authentication) {
             Authentication::Oidc(openid) => (None, Some(openid)),
         };
 
-        let (email, email_verified) = email
-            .as_ref()
-            .map_or_default(|email| (Some(email.as_str()), email.is_verified()));
-
         (
             *id,
             username.as_str(),
             password_hash,
             openid,
-            email,
-            email_verified,
+            None::<&str>,
+            false,
             display_name.as_ref().map(Name::as_str),
         )
     }
@@ -144,7 +124,6 @@ mod tests {
         let user = User {
             id,
             username: Username::new("test")?,
-            email: Some(EmailAddress::Verified("test@example.com".parse()?)),
             display_name: Some(Name::new("test")?),
         };
         let authentication = Authentication::PasswordHash("hash".to_owned());

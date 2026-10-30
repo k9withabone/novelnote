@@ -231,7 +231,6 @@ mod tests {
         Ok(User {
             id,
             username: Username::new(username)?,
-            email: None,
             display_name: None,
         })
     }

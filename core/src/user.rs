@@ -53,37 +53,11 @@ pub struct User {
     /// Used for logging in and user lists if `display_name` is not set.
     pub username: Username,
 
-    /// The user's email address.
-    ///
-    /// If enabled by the server admin, can be used for password resets and notifications.
-    #[serde(default)]
-    pub email: Option<EmailAddress>,
-
     /// The user's display name.
     ///
     /// Shown when the user is logged in and in user lists if set.
     #[serde(default)]
     pub display_name: Option<Name>,
-}
-
-impl User {
-    /// Returns [`Some`] only if the user's email address is [`Verified`].
-    ///
-    /// [`Verified`]: EmailAddress::Verified
-    pub fn verified_email(&self) -> Option<&lettre::Address> {
-        self.email.as_ref().and_then(EmailAddress::as_verified)
-    }
-}
-
-impl ArchivedUser {
-    /// Returns [`Some`] only if the user's email address is [`Verified`].
-    ///
-    /// [`Verified`]: ArchivedEmailAddress::Verified
-    pub fn verified_email(&self) -> Option<&ArchivedLettreAddress> {
-        self.email
-            .as_ref()
-            .and_then(ArchivedEmailAddress::as_verified)
-    }
 }
 
 /// Score a password's strength.
