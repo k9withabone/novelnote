@@ -49,7 +49,7 @@ impl Sessions<'_> {
     ) -> Result<Option<Uuid>, ExecuteError> {
         self.database
             .transaction(move |transaction| {
-                let user_id = transaction.query_one_cached(
+                let user_id = transaction.query_optional_cached(
                     "SELECT user_id FROM valid_sessions WHERE id = ?1",
                     id,
                     |row| row.get(0),
@@ -223,30 +223,27 @@ mod tests {
     use jiff::{SpanRound, ToSpan, Unit};
     use novelnote_core::{User, Username, user::InvalidUsernameError};
 
-    use crate::users::Authentication;
+    use crate::users::{Authentication, NewUser};
 
     use super::*;
 
-    fn user(id: Uuid, username: &str) -> Result<User, InvalidUsernameError> {
-        Ok(User {
-            id,
-            username: Username::new(username)?,
-            display_name: None,
+    fn user(id: Uuid, username: &str) -> Result<NewUser, InvalidUsernameError> {
+        Ok(NewUser {
+            user: User {
+                id,
+                username: Username::new(username)?,
+                display_name: None,
+            },
+            email: None,
+            authentication: Authentication::PasswordHash("hash".to_owned()),
         })
-    }
-
-    fn authentication() -> Authentication {
-        Authentication::PasswordHash("hash".to_owned())
     }
 
     async fn setup() -> Result<(Database, Uuid), Box<dyn Error>> {
         let database = Database::open_in_memory(1).await?;
 
         let user_id = Uuid::nil();
-        database
-            .users()
-            .insert(user(user_id, "test")?, authentication())
-            .await?;
+        database.users().insert(user(user_id, "test")?).await?;
 
         Ok((database, user_id))
     }
@@ -370,10 +367,7 @@ mod tests {
         database.sessions().insert(session_3.clone()).await?;
 
         let user_2_id = Uuid::from_u128(4);
-        database
-            .users()
-            .insert(user(user_2_id, "test_2")?, authentication())
-            .await?;
+        database.users().insert(user(user_2_id, "test_2")?).await?;
 
         let other_session = NewSession {
             id: Uuid::from_u128(5),

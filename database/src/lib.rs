@@ -15,7 +15,8 @@ use std::{
 
 use itertools::Itertools;
 use rusqlite::{
-    CachedStatement, OptionalExtension, Params, Row, Statement, Transaction, types::Type,
+    CachedStatement, OptionalExtension, Params, Row, Statement, Transaction,
+    types::{FromSql, Type},
 };
 use rusqlite_migration::{M, Migrations};
 use thiserror::Error;
@@ -177,13 +178,13 @@ impl Database {
             .map_err(ExecuteError::from_rusqlite)
     }
 
-    /// Execute a cached SQL query that is expected to return a single row.
+    /// Execute a cached SQL query that may return a single row.
     ///
     /// # Errors
     ///
     /// Returns an error if the database is closed, SQLite returned an error, or more than one row
     /// was returned.
-    async fn query_one_cached<P, F, T>(
+    async fn query_optional_cached<P, F, T>(
         &self,
         sql: &'static str,
         params: P,
@@ -194,7 +195,7 @@ impl Database {
         F: FnOnce(&Row<'_>) -> Result<T, rusqlite::Error> + Send + 'static,
         T: Send + 'static,
     {
-        self.call(move |connection| connection.query_one_cached(sql, params, map_fn))
+        self.call(move |connection| connection.query_optional_cached(sql, params, map_fn))
             .await?
             .map_err(ExecuteError::from_rusqlite)
     }
@@ -210,7 +211,7 @@ impl Database {
     async fn transaction<F, T>(&self, f: F) -> Result<T, ExecuteError>
     where
         F: FnOnce(&mut Transaction) -> Result<T, rusqlite::Error> + Send + 'static,
-        T: Send + 'static + Default,
+        T: Send + 'static,
     {
         self.call(|connection| {
             let mut transaction = connection.transaction()?;
@@ -395,6 +396,18 @@ impl From<oneshot::error::RecvError> for ConnectionClosed {
     }
 }
 
+/// Error returned when inserting a new row into a database table fails.
+#[derive(Error, Debug)]
+pub enum InsertError<D> {
+    /// New row had a duplicate value for a column or columns that must have unique values.
+    #[error("new row must have a unique `{0}`")]
+    Duplicate(D),
+
+    /// Error executing database command.
+    #[error("error executing database command")]
+    Execute(#[from] ExecuteError),
+}
+
 /// Extension trait for [`rusqlite::Connection`].
 trait RusqliteConnectionExt {
     /// Prepare a SQL statement for executing.
@@ -439,12 +452,28 @@ trait RusqliteConnectionExt {
             .try_collect()
     }
 
-    /// Execute a cached SQL query that is expected to return a single row.
+    /// Execute a SQL query that returns a single row with a single value.
     ///
     /// # Errors
     ///
-    /// Returns an error if SQLite returned an error or more than one row was returned.
-    fn query_one_cached<T>(
+    /// Returns an error if binding the parameters fails, SQLite returned an error, more than one
+    /// row was returned, or no rows were returned.
+    fn query_value<T: FromSql>(
+        &self,
+        sql: &str,
+        params: impl AsParams,
+    ) -> Result<T, rusqlite::Error> {
+        self.prepare(sql)?
+            .query_one(params.as_params(), |row| row.get(0))
+    }
+
+    /// Execute a cached SQL query that may return a single row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if binding the parameters fails, SQLite returned an error, or more than one
+    /// row was returned.
+    fn query_optional_cached<T>(
         &self,
         sql: &str,
         params: impl AsParams,
@@ -470,6 +499,12 @@ impl RusqliteConnectionExt for rusqlite::Connection {
 trait AsParams {
     /// Convert this value into SQL statement/query parameters.
     fn as_params(&self) -> impl Params;
+}
+
+impl<T: AsParams> AsParams for &T {
+    fn as_params(&self) -> impl Params {
+        T::as_params(self)
+    }
 }
 
 impl AsParams for () {
