@@ -1,6 +1,6 @@
 //! Methods for interacting with the `users` table.
 
-use std::fmt::Display;
+use std::fmt::{self, Display, Formatter};
 
 use novelnote_core::{Name, User, Username, user::EmailAddress};
 use tracing::instrument;
@@ -199,7 +199,7 @@ impl UniqueColumn {
 }
 
 impl Display for UniqueColumn {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }

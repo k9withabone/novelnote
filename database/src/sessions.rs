@@ -1,6 +1,10 @@
 //! Methods for interacting with the `sessions` table.
 
-use std::{net::IpAddr, time::Duration};
+use std::{
+    fmt::{self, Display, Formatter},
+    net::IpAddr,
+    time::Duration,
+};
 
 use jiff::Timestamp;
 use novelnote_core::{TimestampExt, user::Session};
@@ -23,15 +27,26 @@ impl Sessions<'_> {
     ///
     /// Returns an error if the database is closed or SQLite returned an error.
     #[instrument(level = "trace", skip(self))]
-    pub async fn insert(&self, session: NewSession) -> Result<(), ExecuteError> {
+    pub async fn insert(&self, session: NewSession) -> Result<(), InsertError> {
         self.database
-            .execute(
-                "INSERT INTO sessions \
-                 (id, user_id, ip_address, user_agent, started, expires) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                session,
-            )
-            .await
+            .transaction(move |transaction| {
+                if transaction.query_value(
+                    "SELECT count(*) > 0 FROM sessions WHERE id = ?1",
+                    session.id,
+                )? {
+                    Ok(Err(UniqueColumn::Id.into()))
+                } else {
+                    transaction.execute(
+                        "INSERT INTO sessions \
+                         (id, user_id, ip_address, user_agent, started, expires) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        session.as_params(),
+                    )?;
+
+                    Ok(Ok(()))
+                }
+            })
+            .await?
     }
 
     /// Get the user ID belonging to an unexpired session and update the session.
@@ -163,6 +178,38 @@ impl AsParams for NewSession {
     }
 }
 
+/// Error returned when [inserting](Sessions::insert()) a new session fails.
+pub type InsertError = crate::InsertError<UniqueColumn>;
+
+/// Columns in the `sessions` table that must have a unique value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UniqueColumn {
+    /// `id` column.
+    Id,
+}
+
+impl From<UniqueColumn> for InsertError {
+    fn from(value: UniqueColumn) -> Self {
+        Self::Duplicate(value)
+    }
+}
+
+impl UniqueColumn {
+    /// Unique `sessions` column as a static string slice.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Id => "id",
+        }
+    }
+}
+
+impl Display for UniqueColumn {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Parameters from a new request to update a session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Update {
@@ -218,7 +265,7 @@ impl AsParams for (Update, Uuid) {
 
 #[cfg(test)]
 mod tests {
-    use std::{error::Error, iter::repeat_n, net::Ipv4Addr};
+    use std::{assert_matches, error::Error, iter::repeat_n, net::Ipv4Addr};
 
     use jiff::{SpanRound, ToSpan, Unit};
     use novelnote_core::{User, Username, user::InvalidUsernameError};
@@ -252,9 +299,8 @@ mod tests {
     async fn cascade() -> Result<(), Box<dyn Error>> {
         let (database, user_id) = setup().await?;
 
-        let session_id = Uuid::from_u128(1);
         let session = NewSession {
-            id: session_id,
+            id: Uuid::from_u128(1),
             user_id,
             ip_address: None,
             user_agent: None,
@@ -266,6 +312,28 @@ mod tests {
 
         database.users().delete(user_id).await?;
         assert_eq!(database.sessions().by_user_id(user_id).await?, []);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn duplicate_id_err() -> Result<(), Box<dyn Error>> {
+        let (database, user_id) = setup().await?;
+
+        let session = NewSession {
+            id: Uuid::from_u128(1),
+            user_id,
+            ip_address: None,
+            user_agent: None,
+            expires_in: Duration::from_secs(10),
+        };
+
+        database.sessions().insert(session.clone()).await?;
+
+        assert_matches!(
+            database.sessions().insert(session).await,
+            Err(InsertError::Duplicate(UniqueColumn::Id)),
+        );
 
         Ok(())
     }
