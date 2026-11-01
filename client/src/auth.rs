@@ -1,7 +1,7 @@
 //! `/api/auth` routes and responses.
 
-use novelnote_core::user::ScorePasswordParameters;
 pub use novelnote_core::user::{PasswordScore, WeakPasswordError};
+use novelnote_core::{Secret, user::ScorePasswordParameters};
 use reqwest::StatusCode;
 use thiserror::Error;
 
@@ -30,7 +30,7 @@ impl Auth<'_> {
     /// unexpected response.
     pub async fn score_password(
         &self,
-        password: String,
+        password: Secret,
         user_inputs: Vec<String>,
     ) -> Result<PasswordScore, ScorePasswordError> {
         let parameters = ScorePasswordParameters {
@@ -100,7 +100,7 @@ mod tests {
                 async |client| {
                     client
                         .auth()
-                        .score_password("octane slam pushover blah".to_owned(), Vec::new())
+                        .score_password("octane slam pushover blah".into(), Vec::new())
                         .await
                 },
             )
@@ -119,7 +119,7 @@ mod tests {
                 async |client| {
                     client
                         .auth()
-                        .score_password("test".to_owned(), Vec::new())
+                        .score_password("test".into(), Vec::new())
                         .await
                 },
             )

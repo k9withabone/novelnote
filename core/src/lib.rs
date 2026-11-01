@@ -12,12 +12,87 @@ mod rkyv_with;
 mod serde_with;
 pub mod user;
 
+use std::fmt::{self, Debug, Formatter};
+
 use jiff::{Timestamp, Unit};
+use rkyv::string::ArchivedString;
 
 pub use crate::{
     name::{ArchivedName, InvalidNameError, Name, NameResolver},
     user::{User, Username},
 };
+
+/// A [`String`] whose [`Debug`] representation is `"REDACTED"`.
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(feature = "utoipa", schema(format = Password))]
+#[rkyv(derive(PartialEq, Eq), compare(PartialEq))]
+pub struct Secret(String);
+
+impl Secret {
+    /// Create a new [`Secret`].
+    #[must_use]
+    pub const fn new(secret: String) -> Self {
+        Self(secret)
+    }
+
+    /// Reveal the secret as a string slice.
+    #[must_use]
+    pub const fn reveal(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Reveal the secret as a byte slice.
+    #[must_use]
+    pub const fn reveal_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+
+    /// Return the inner string.
+    #[must_use]
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl Debug for Secret {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_tuple("Secret").field(&"REDACTED").finish()
+    }
+}
+
+impl Debug for ArchivedSecret {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_tuple("ArchivedSecret").field(&"REDACTED").finish()
+    }
+}
+
+impl From<String> for Secret {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for Secret {
+    fn from(value: &str) -> Self {
+        value.to_owned().into()
+    }
+}
+
+impl From<ArchivedString> for ArchivedSecret {
+    fn from(value: ArchivedString) -> Self {
+        Self(value)
+    }
+}
 
 /// Extension trait for [`Timestamp`].
 ///

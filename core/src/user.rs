@@ -15,7 +15,7 @@ use uuid::Uuid;
 use zxcvbn::zxcvbn;
 
 use crate::{
-    Name,
+    Name, Secret,
     rkyv_with::{LettreAddress, TimestampRoundedSecond},
     serde_with::timestamp_rounded_second,
 };
@@ -105,8 +105,7 @@ pub fn score_password(
 #[rkyv(derive(Debug, PartialEq, Eq), compare(PartialEq))]
 pub struct ScorePasswordParameters {
     /// Password to score.
-    #[cfg_attr(feature = "utoipa", schema(format = Password))]
-    pub password: String,
+    pub password: Secret,
 
     /// Other user supplied information to check the password for.
     #[serde(default)]
@@ -275,7 +274,7 @@ pub struct SignupCredentials {
     pub email: Option<lettre::Address>,
 
     /// New user's password for logging in.
-    pub password: String,
+    pub password: Secret,
 }
 
 /// [`User`] and token for an authenticated [`Session`].

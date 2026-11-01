@@ -59,7 +59,7 @@ async fn score_password_strength(
 ) -> impl IntoResponse {
     let user_inputs = user_inputs.iter().map(String::as_str).collect_vec();
 
-    score_password(&password, &user_inputs)
+    score_password(password.reveal(), &user_inputs)
         .map(|score| (StatusCode::OK, content_type.into_body(score)))
         .map_err(|error| (StatusCode::BAD_REQUEST, content_type.into_body(error)))
 }
