@@ -9,11 +9,16 @@ use std::{
 };
 
 use jiff::Timestamp;
+use rkyv::with::Map;
 use thiserror::Error;
 use uuid::Uuid;
 use zxcvbn::zxcvbn;
 
-use crate::{Name, rkyv_with::TimestampRoundedSecond, serde_with::timestamp_rounded_second};
+use crate::{
+    Name,
+    rkyv_with::{LettreAddress, TimestampRoundedSecond},
+    serde_with::timestamp_rounded_second,
+};
 
 pub use self::{
     email_address::{
@@ -84,7 +89,7 @@ pub fn score_password(
     }
 }
 
-/// Request body parameters for the POST `/api/auth/score-password` route.
+/// Request body parameters for the `POST /api/auth/score-password` route.
 #[derive(
     serde::Serialize,
     serde::Deserialize,
@@ -97,6 +102,7 @@ pub fn score_password(
     Eq,
 )]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[rkyv(derive(Debug, PartialEq, Eq), compare(PartialEq))]
 pub struct ScorePasswordParameters {
     /// Password to score.
     #[cfg_attr(feature = "utoipa", schema(format = Password))]
@@ -123,6 +129,10 @@ pub struct ScorePasswordParameters {
     Ord,
 )]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[rkyv(
+    derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord),
+    compare(PartialEq, PartialOrd)
+)]
 #[repr(u8)]
 pub enum PasswordScore {
     /// 10^3 guesses or less.
@@ -187,6 +197,7 @@ impl Display for PasswordScore {
     feature = "utoipa",
     schema(description = "Error returned when a password is scored less than 3.")
 )]
+#[rkyv(derive(Debug, PartialEq, Eq), compare(PartialEq))]
 #[error("password was too weak, on a 0-4 scale it scored a {score}")]
 pub struct WeakPasswordError {
     /// The password's score based on how many guesses it would take to crack.
@@ -220,6 +231,79 @@ impl WeakPasswordError {
             suggestions,
         }
     }
+}
+
+/// Credentials for when a new [`User`] signs up for NovelNote.
+///
+/// Request body for the `POST /api/auth/signup` route.
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(
+    feature = "utoipa",
+    schema(description = "Credentials for when a new user signs up for NovelNote.")
+)]
+#[rkyv(derive(Debug, PartialEq, Eq), compare(PartialEq))]
+pub struct SignupCredentials {
+    /// New user's username.
+    ///
+    /// Used for logging in and user lists if `display_name` is not set.
+    pub username: Username,
+
+    /// New user's display name.
+    ///
+    /// Shown when the user is logged in and in user lists if set.
+    #[serde(default)]
+    pub display_name: Option<Name>,
+
+    /// New user's email address.
+    ///
+    /// Can be used for password resets and notifications. Ignored and not saved if SMTP settings
+    /// for the server have not been set.
+    #[serde(default)]
+    #[rkyv(with = Map<LettreAddress>)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>, format = IdnEmail))]
+    pub email: Option<lettre::Address>,
+
+    /// New user's password for logging in.
+    pub password: String,
+}
+
+/// [`User`] and token for an authenticated [`Session`].
+///
+/// Returned from the `POST /api/auth/login` and `POST /api/auth/signup` routes.
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(
+    feature = "utoipa",
+    schema(description = "User and token for an authenticated session.")
+)]
+#[rkyv(derive(Debug, PartialEq, Eq), compare(PartialEq))]
+pub struct Authenticated {
+    /// User authenticated as.
+    pub user: User,
+
+    /// Session token that may be used to authenticate future requests.
+    pub token: String,
 }
 
 /// A session belonging to a logged-in [`User`].
