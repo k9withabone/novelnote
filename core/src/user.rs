@@ -270,7 +270,10 @@ pub struct SignupCredentials {
     /// for the server have not been set.
     #[serde(default)]
     #[rkyv(with = Map<LettreAddress>)]
-    #[cfg_attr(feature = "utoipa", schema(value_type = Option<String>, format = IdnEmail))]
+    #[cfg_attr(
+        feature = "utoipa",
+        schema(value_type = Option<String>, format = IdnEmail, example = "user@example.com"),
+    )]
     pub email: Option<lettre::Address>,
 
     /// New user's password for logging in.
@@ -279,7 +282,7 @@ pub struct SignupCredentials {
 
 /// [`User`] and token for an authenticated [`Session`].
 ///
-/// Returned from the `POST /api/auth/login` and `POST /api/auth/signup` routes.
+/// Response body the `POST /api/auth/login` and `POST /api/auth/signup` routes.
 #[derive(
     serde::Serialize,
     serde::Deserialize,
@@ -303,6 +306,44 @@ pub struct Authenticated {
 
     /// Session token that may be used to authenticate future requests.
     pub token: String,
+}
+
+/// Error returned when the [`SignupCredentials`] for a new [`User`] are invalid.
+///
+/// Error response body for the `POST /api/auth/signup` route.
+#[derive(
+    Error,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(
+    feature = "utoipa",
+    schema(
+        description = "Error returned when the credentials for a new user when signing up are \
+            invalid.",
+    )
+)]
+#[serde(rename_all = "snake_case")]
+pub enum InvalidSignupCredentials {
+    /// Password was too weak.
+    #[error("password was too weak")]
+    WeakPassword(#[from] WeakPasswordError),
+
+    /// A user with the given username already exists.
+    #[error("a user with the given username already exists")]
+    ExistingUsername,
+
+    /// A user with the given email already exists.
+    #[error("a user with the given email already exists")]
+    ExistingEmail,
 }
 
 /// A session belonging to a logged-in [`User`].

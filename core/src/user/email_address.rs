@@ -28,7 +28,10 @@ use crate::rkyv_with::LettreAddress;
 #[rkyv(derive(Debug, PartialEq, Eq, Hash), compare(PartialEq))]
 pub enum EmailAddress {
     /// It is unknown if the email address belongs to the user.
-    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = IdnEmail))]
+    #[cfg_attr(
+        feature = "utoipa",
+        schema(value_type = String, format = IdnEmail, example = "user@example.com"),
+    )]
     Unverified(
         #[rkyv(with = LettreAddress)]
         #[cfg_attr(
@@ -39,7 +42,10 @@ pub enum EmailAddress {
     ),
 
     /// The email address has been confirmed to belong to the user.
-    #[cfg_attr(feature = "utoipa", schema(value_type = String, format = IdnEmail))]
+    #[cfg_attr(
+        feature = "utoipa",
+        schema(value_type = String, format = IdnEmail, example = "user@example.com"),
+    )]
     Verified(
         #[rkyv(with = LettreAddress)]
         #[cfg_attr(
