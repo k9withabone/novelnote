@@ -19,7 +19,10 @@ use utoipa::{
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_redoc::{Redoc, Servable};
 
-use crate::api::body::MediaType;
+use crate::AppState;
+
+pub(crate) use self::auth::Config as AuthConfig;
+use self::body::MediaType;
 
 /// Path the [`router()`] should be nested under.
 pub(crate) const PATH: &str = "/api";
@@ -27,7 +30,7 @@ pub(crate) const PATH: &str = "/api";
 /// Router for `/api`.
 ///
 /// Provides all routes for NovelNote's HTTP API and documentation via Redoc.
-pub(crate) fn router() -> Router<Database> {
+pub(crate) fn router() -> Router<AppState> {
     let (router, mut openapi) = OpenApiRouter::default()
         .routes(routes!(health_check))
         .nest(auth::PATH, auth::router())

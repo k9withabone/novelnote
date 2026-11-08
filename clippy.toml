@@ -15,6 +15,13 @@ allowed-duplicate-crates = [
   # `proptest` uses `getrandom@0.3`
   "getrandom",
 
+  # `cookie` uses `base64@0.22`
+  "base64",
+
+  # `aes-gcm` uses `cpufeatures@0.2` and `crypto-common@0.1`
+  "cpufeatures",
+  "crypto-common",
+
   # `leptos` dependencies
   "convert_case",
   "thiserror",

@@ -2,6 +2,7 @@
 
 use std::{
     borrow::Cow,
+    collections::HashSet,
     fmt::{self, Display, Formatter},
     fs::Metadata,
     io,
@@ -22,7 +23,7 @@ use directories::ProjectDirs;
 use jiff::{Span, Timestamp, Unit, fmt::serde::tz, tz::TimeZone};
 use novelnote_admin::{AdminClient, AdminServer};
 use novelnote_database::Database;
-use novelnote_server::Server;
+use novelnote_server::{SecretKey, Server};
 use serde::{
     Deserialize, Deserializer,
     de::{self, IntoDeserializer},
@@ -885,11 +886,19 @@ impl HttpServerConfig {
 
         Ok(Server {
             bind_address: bind_address.try_into_server_address(port).await?,
+            // TODO: `trusted_proxies` from config
+            trusted_proxies: HashSet::new(),
             asset_directory: if let Some(asset_directory) = asset_directory {
                 asset_directory
             } else {
                 default_asset_directory().await
             },
+            // TODO: `password_signup_enabled` from config
+            password_signup_enabled: true,
+            // TODO: `session_length` from config
+            session_length: Duration::from_hours(2),
+            // TODO: `secret_key` from file via config
+            secret_key: SecretKey::generate(),
             database,
         })
     }

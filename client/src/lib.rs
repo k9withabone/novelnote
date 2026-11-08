@@ -279,12 +279,14 @@ pub enum DeserializeError {
 #[cfg(unix)]
 mod tests {
     use std::{
+        collections::HashSet,
         error::Error,
         path::{Path, PathBuf},
+        time::Duration,
     };
 
     use novelnote_database::Database;
-    use novelnote_server::{BindAddress, Server};
+    use novelnote_server::{BindAddress, SecretKey, Server};
     use tempfile::TempDir;
     use tokio::sync::oneshot;
     use tokio_util::sync::CancellationToken;
@@ -307,7 +309,11 @@ mod tests {
 
         let server = Server {
             bind_address: BindAddress::Unix(path.clone()),
+            trusted_proxies: HashSet::new(),
             asset_directory: PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../target/dist")),
+            password_signup_enabled: true,
+            session_length: Duration::from_secs(60),
+            secret_key: SecretKey::generate(),
             database,
         };
 

@@ -1,6 +1,11 @@
 //! [`RequestBody`] and [`ResponseBody`].
 
-use std::{future::Ready, num::ParseIntError, str::FromStr};
+use std::{
+    fmt::{self, Display, Formatter},
+    future::Ready,
+    num::ParseIntError,
+    str::FromStr,
+};
 
 use axum::{
     Form, Json, RequestExt,
@@ -134,7 +139,24 @@ impl IntoResponse for RequestBodyRejection {
 }
 
 /// Response for serializing into a supported [`MediaType`].
-pub(super) struct ResponseBody<T>(pub(super) ResponseContentType, pub(super) T);
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ResponseBody<T>(pub(super) ResponseContentType, #[source] pub(super) T);
+
+impl<T> ResponseBody<T> {
+    /// Map the response body to a different type.
+    pub(super) fn map<U>(self, f: impl FnOnce(T) -> U) -> ResponseBody<U> {
+        let Self(content_type, body) = self;
+        ResponseBody(content_type, f(body))
+    }
+
+    /// Map the response body to a different type using [`Into::into()`].
+    pub(super) fn map_into<U>(self) -> ResponseBody<U>
+    where
+        T: Into<U>,
+    {
+        self.map(Into::into)
+    }
+}
 
 impl<T> IntoResponse for ResponseBody<T>
 where
@@ -149,6 +171,13 @@ where
             MediaType::Json => Json(value).into_response(),
             MediaType::Rkyv => Rkyv(value).into_response(),
         }
+    }
+}
+
+impl<T: Display> Display for ResponseBody<T> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let Self(_, body) = self;
+        Display::fmt(body, f)
     }
 }
 
@@ -541,11 +570,7 @@ mod tests {
 
     #[cfg(test)]
     mod quality_value {
-        use std::{
-            fmt::{self, Display, Formatter},
-            hint::black_box,
-            ops::RangeInclusive,
-        };
+        use std::{hint::black_box, ops::RangeInclusive};
 
         use proptest::{
             arbitrary::Arbitrary,

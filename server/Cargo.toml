@@ -14,23 +14,36 @@ keywords.workspace = true
 workspace = true
 
 [dependencies]
+aes-gcm = { version = "0.10.3", features = ["std"] }
+argon2 = "0.6.0"
 axum = "0.8.8"
+axum-extra = { version = "0.12.6", features = ["cookie-private"] }
+base64 = "0.23.1"
 http-body-util = "0.1.5"
 itertools.workspace = true
 mime.workspace = true
 novelnote_core = { workspace = true, features = ["utoipa"] }
 novelnote_database.workspace = true
+rand = "0.10.3"
 rkyv.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+time = "0.3.55"
 tokio = { workspace = true, features = ["fs", "net", "sync"] }
 tokio-stream.workspace = true
+tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["fs", "timeout", "trace"] }
 tracing.workspace = true
 tracing-error.workspace = true
+typenum = "1.20.1"
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-axum = "0.3.0"
 utoipa-redoc = { version = "7.0.0", features = ["axum"] }
+uuid = { workspace = true, features = ["v7"] }
+
+[dependencies.lettre]
+workspace = true
+features = ["builder", "pool", "smtp-transport", "tokio1"]
 
 [dev-dependencies]
 proptest.workspace = true
