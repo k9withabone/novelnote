@@ -27,3 +27,4 @@ novelnote_server.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 tokio-util.workspace = true
+uuid.workspace = true

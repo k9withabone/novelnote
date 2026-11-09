@@ -10,6 +10,7 @@ use std::{
 
 use futures_util::{Stream, TryStreamExt};
 use mime::Mime;
+use novelnote_core::User;
 pub use reqwest::{self, Url};
 use reqwest::{
     Response, StatusCode,
@@ -132,6 +133,38 @@ impl Client {
     }
 }
 
+/// NovelNote HTTP client for routes that require authentication.
+///
+/// Cheap to clone as [`Arc`]s are used internally.
+#[derive(Debug, Clone)]
+pub struct AuthenticatedClient {
+    /// Inner client.
+    #[expect(dead_code, reason = "future use")]
+    client: Client,
+
+    /// Authentication token this client authenticates itself with, if not using cookies.
+    token: Option<Arc<str>>,
+
+    /// User authenticated as.
+    user: Arc<User>,
+}
+
+impl AuthenticatedClient {
+    /// Returns the [`User`] that this client is authenticated as.
+    #[must_use]
+    pub fn authenticated_user(&self) -> &User {
+        &self.user
+    }
+
+    /// Returns the authentication token this client authenticates itself with.
+    ///
+    /// Returns [`None`] if this client is using cookie based authentication.
+    #[must_use]
+    pub fn authentication_token(&self) -> Option<&str> {
+        self.token.as_deref()
+    }
+}
+
 /// Error returned when [`Client::health_check()`] fails.
 #[derive(Error, Debug)]
 pub enum HealthCheckError {
@@ -185,7 +218,7 @@ impl Display for UnexpectedError {
         write!(f, "server responded with an unexpected status `{status}`")?;
 
         if let Some(message) = message.as_ref() {
-            write!(f, " with message \"{message}\"")?;
+            write!(f, " with the message \"{message}\"")?;
         }
 
         Ok(())
@@ -313,7 +346,7 @@ mod tests {
             asset_directory: PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../target/dist")),
             password_signup_enabled: true,
             session_length: Duration::from_secs(60),
-            secret_key: SecretKey::generate(),
+            secret_key: SecretKey::new([0; 64])?,
             database,
         };
 
