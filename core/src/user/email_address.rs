@@ -67,9 +67,16 @@ impl EmailAddress {
         }
     }
 
-    /// Get the email address whether or not it is verified.
+    /// Get a reference to the email address, whether or not it is verified.
     #[must_use]
     pub const fn as_address(&self) -> &lettre::Address {
+        let (Self::Verified(address) | Self::Unverified(address)) = self;
+        address
+    }
+
+    /// Get the email address, whether or not it is verified.
+    #[must_use]
+    pub fn into_address(self) -> lettre::Address {
         let (Self::Verified(address) | Self::Unverified(address)) = self;
         address
     }
@@ -98,6 +105,12 @@ impl EmailAddress {
         } else {
             None
         }
+    }
+}
+
+impl AsRef<lettre::Address> for EmailAddress {
+    fn as_ref(&self) -> &lettre::Address {
+        self.as_address()
     }
 }
 
@@ -170,6 +183,12 @@ impl PartialEq<Cow<'_, str>> for EmailAddress {
 impl PartialEq<EmailAddress> for Cow<'_, str> {
     fn eq(&self, other: &EmailAddress) -> bool {
         self.as_ref() == other.as_str()
+    }
+}
+
+impl From<EmailAddress> for lettre::Address {
+    fn from(value: EmailAddress) -> Self {
+        value.into_address()
     }
 }
 
