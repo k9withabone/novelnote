@@ -176,6 +176,20 @@
 # Default value: 8080
 #port = 8080
 
+# IP addresses of proxies trusted to set the `X-Forwarded-For` header correctly.
+#
+# This is used to determine the originating IP address of a client for logging purposes.
+#
+# If not set, the connecting IP address is used as the client's. If NovelNote is set up behind
+# a reverse proxy, the connecting IP address will always be the reverse proxy's IP address.
+#
+# When setting via environment variable or CLI option, values may be delimited by a comma (,).
+#
+# Can also be specified via environment variable `TRUSTED_PROXIES`.
+#
+# Default value: []
+#trusted_proxies = []
+
 # Path to the directory containing NovelNote's frontend and other assets.
 #
 # Defaults to `/usr/share/novelnote/dist` or `/usr/local/share/novelnote/dist` on Linux and

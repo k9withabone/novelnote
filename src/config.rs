@@ -5,7 +5,6 @@ mod log;
 
 use std::{
     borrow::Cow,
-    collections::HashSet,
     fs::Metadata,
     io,
     net::{IpAddr, SocketAddr},
@@ -328,6 +327,21 @@ pub(crate) struct HttpServerConfig {
     )]
     pub port: u16,
 
+    /// IP addresses of proxies trusted to set the `X-Forwarded-For` header correctly.
+    ///
+    /// This is used to determine the originating IP address of a client for logging purposes.
+    ///
+    /// If not set, the connecting IP address is used as the client's. If NovelNote is set up behind
+    /// a reverse proxy, the connecting IP address will always be the reverse proxy's IP address.
+    ///
+    /// When setting via environment variable or CLI option, values may be delimited by a comma (,).
+    #[config(
+        env = "TRUSTED_PROXIES",
+        default = [],
+        layer_attr(arg(long, env, value_delimiter = ','))
+    )]
+    pub trusted_proxies: Vec<IpAddr>,
+
     /// Path to the directory containing NovelNote's frontend and other assets.
     ///
     /// Defaults to `/usr/share/novelnote/dist` or `/usr/local/share/novelnote/dist` on Linux and
@@ -350,13 +364,13 @@ impl HttpServerConfig {
         let Self {
             bind_address,
             port,
+            trusted_proxies,
             asset_directory,
         } = self;
 
         Ok(Server {
             bind_address: bind_address.try_into_server_address(port).await?,
-            // TODO: `trusted_proxies` from config
-            trusted_proxies: HashSet::new(),
+            trusted_proxies: trusted_proxies.into_iter().collect(),
             asset_directory: if let Some(asset_directory) = asset_directory {
                 asset_directory
             } else {
