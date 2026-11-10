@@ -197,3 +197,13 @@
 #
 # Can also be specified via environment variable `ASSET_DIRECTORY`.
 #asset_directory =
+
+# Whether user signups using a password are enabled (default).
+#
+# Disabling password signups causes the web frontend to not show a signup option and the
+# `POST /api/auth/signup` route to return a `403: Forbidden` status.
+#
+# Can also be specified via environment variable `PASSWORD_SIGNUPS_ENABLED`.
+#
+# Default value: true
+#enable_password_signups = true

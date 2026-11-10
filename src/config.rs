@@ -356,6 +356,17 @@ pub(crate) struct HttpServerConfig {
         ))
     )]
     pub asset_directory: Option<PathBuf>,
+
+    /// Whether user signups using a password are enabled (default).
+    ///
+    /// Disabling password signups causes the web frontend to not show a signup option and the
+    /// `POST /api/auth/signup` route to return a `403: Forbidden` status.
+    #[config(
+        env = "PASSWORD_SIGNUPS_ENABLED",
+        default = true,
+        layer_attr(arg(long, env = "PASSWORD_SIGNUPS_ENABLED", value_name = "ENABLED"))
+    )]
+    pub enable_password_signups: bool,
 }
 
 impl HttpServerConfig {
@@ -366,6 +377,7 @@ impl HttpServerConfig {
             port,
             trusted_proxies,
             asset_directory,
+            enable_password_signups: password_signup_enabled,
         } = self;
 
         Ok(Server {
@@ -376,8 +388,7 @@ impl HttpServerConfig {
             } else {
                 default_asset_directory().await
             },
-            // TODO: `password_signup_enabled` from config
-            password_signup_enabled: true,
+            password_signup_enabled,
             // TODO: `session_length` from config
             session_length: Duration::from_hours(2),
             // TODO: `secret_key` from file via config
