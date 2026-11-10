@@ -21,7 +21,14 @@ use color_eyre::{
 };
 use confique::toml::FormatOptions;
 use directories::ProjectDirs;
-use jiff::{fmt::serde::tz, tz::TimeZone};
+use jiff::{
+    Span, SpanRelativeTo, SpanRound, Unit,
+    fmt::{
+        friendly::{Designator, Spacing, SpanPrinter},
+        serde::tz,
+    },
+    tz::TimeZone,
+};
 use novelnote_database::Database;
 use novelnote_server::{SecretKey, Server};
 use serde::{
@@ -367,6 +374,23 @@ pub(crate) struct HttpServerConfig {
         layer_attr(arg(long, env = "PASSWORD_SIGNUPS_ENABLED", value_name = "ENABLED"))
     )]
     pub enable_password_signups: bool,
+
+    /// How long between requests a session should be valid for before expiring.
+    ///
+    /// For example, if a user logs in and then does nothing until the session expires, they will
+    /// have to log in again before accessing NovelNote.
+    ///
+    /// See the [`jiff` "friendly" format] for examples of how this may be specified.
+    ///
+    /// The default is 2 hours. The maximum is 1 week.
+    ///
+    /// [`jiff` "friendly" format]: https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html
+    #[config(
+        env = "SESSION_LENGTH",
+        default = "2 hours",
+        layer_attr(arg(long, env))
+    )]
+    pub session_length: Timeout<{ Duration::from_hours(24 * 7).as_secs() }>,
 }
 
 impl HttpServerConfig {
@@ -378,6 +402,7 @@ impl HttpServerConfig {
             trusted_proxies,
             asset_directory,
             enable_password_signups: password_signup_enabled,
+            session_length,
         } = self;
 
         Ok(Server {
@@ -389,8 +414,7 @@ impl HttpServerConfig {
                 default_asset_directory().await
             },
             password_signup_enabled,
-            // TODO: `session_length` from config
-            session_length: Duration::from_hours(2),
+            session_length: session_length.into(),
             // TODO: `secret_key` from file via config
             secret_key: SecretKey::generate(),
             database,
@@ -488,6 +512,84 @@ impl<'de> Deserialize<'de> for BindAddress {
         String::deserialize(deserializer)?
             .parse()
             .map_err(de::Error::custom)
+    }
+}
+
+/// A [`Duration`] that is limited to `S` number of seconds.
+///
+/// Parsed from the [`jiff` "friendly" format](https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Timeout<const S: u64>(Duration);
+
+impl<const S: u64> Timeout<S> {
+    /// Maximum duration this timeout can be.
+    const MAX_DURATION: Duration = Duration::from_secs(S);
+
+    /// Create a new timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `duration` is longer than `S` seconds.
+    pub(crate) fn new(duration: Duration) -> Result<Self, Report> {
+        if duration > Self::MAX_DURATION {
+            let printer = SpanPrinter::new()
+                .designator(Designator::Verbose)
+                .spacing(Spacing::BetweenUnitsAndDesignators);
+
+            let max = i64::try_from(S).map_or_else(
+                |_| printer.unsigned_duration_to_string(&Self::MAX_DURATION),
+                |seconds| {
+                    let span = Span::new()
+                        .seconds(seconds)
+                        .round(SpanRound::new().largest(Unit::Week).days_are_24_hours())
+                        .expect("balancing only");
+                    printer.span_to_string(&span)
+                },
+            );
+
+            Err(eyre!("duration must be less than {max} long"))
+        } else {
+            Ok(Self(duration))
+        }
+    }
+}
+
+impl<const S: u64> TryFrom<Duration> for Timeout<S> {
+    type Error = Report;
+
+    fn try_from(value: Duration) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl<const S: u64> TryFrom<Span> for Timeout<S> {
+    type Error = Report;
+
+    fn try_from(value: Span) -> Result<Self, Self::Error> {
+        let value = value.to_duration(SpanRelativeTo::days_are_24_hours())?;
+        Duration::try_from(value)?.try_into()
+    }
+}
+
+impl<'de, const S: u64> Deserialize<'de> for Timeout<S> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Span::deserialize(deserializer)?
+            .try_into()
+            .map_err(de::Error::custom)
+    }
+}
+
+impl<const S: u64> FromStr for Timeout<S> {
+    type Err = Report;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Span::from_str(s)?.try_into()
+    }
+}
+
+impl<const S: u64> From<Timeout<S>> for Duration {
+    fn from(value: Timeout<S>) -> Self {
+        value.0
     }
 }
 

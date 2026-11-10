@@ -4,23 +4,21 @@ use std::{
     fmt::{self, Display, Formatter},
     path::{Path, PathBuf},
     str::FromStr,
-    time::Duration,
 };
 
 use clap::Args;
 use color_eyre::{
     Section,
-    eyre::{Report, WrapErr, ensure},
+    eyre::{Report, WrapErr},
 };
 use directories::ProjectDirs;
-use jiff::Span;
 use novelnote_admin::{AdminClient, AdminServer};
 use novelnote_database::Database;
 use serde::{Deserialize, Deserializer, de};
 
 #[cfg(unix)]
 use super::create_parent_dir;
-use super::load_config;
+use super::{Timeout, load_config};
 
 /// Admin socket configuration. The `[admin]` section in a config file.
 #[derive(confique::Config, Debug, Clone, PartialEq, Eq)]
@@ -254,64 +252,5 @@ impl AsRef<Path> for AdminSocketPath {
 impl Display for AdminSocketPath {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Display::fmt(&self.0.display(), f)
-    }
-}
-
-/// How long an admin connection should be open before timing out.
-///
-/// `S` is max number of seconds a timeout can be.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Timeout<const S: u64>(Duration);
-
-impl<const S: u64> Timeout<S> {
-    /// Create a new timeout.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the `duration` is longer than `S` seconds.
-    pub(crate) fn new(duration: Duration) -> Result<Self, Report> {
-        ensure!(
-            duration <= Duration::from_secs(S),
-            "timeout must be less than {S} seconds long"
-        );
-        Ok(Self(duration))
-    }
-}
-
-impl<const S: u64> TryFrom<Duration> for Timeout<S> {
-    type Error = Report;
-
-    fn try_from(value: Duration) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl<const S: u64> TryFrom<Span> for Timeout<S> {
-    type Error = Report;
-
-    fn try_from(value: Span) -> Result<Self, Self::Error> {
-        Duration::try_from(value)?.try_into()
-    }
-}
-
-impl<'de, const S: u64> Deserialize<'de> for Timeout<S> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Span::deserialize(deserializer)?
-            .try_into()
-            .map_err(de::Error::custom)
-    }
-}
-
-impl<const S: u64> FromStr for Timeout<S> {
-    type Err = Report;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Span::from_str(s)?.try_into()
-    }
-}
-
-impl<const S: u64> From<Timeout<S>> for Duration {
-    fn from(value: Timeout<S>) -> Self {
-        value.0
     }
 }

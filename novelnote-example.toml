@@ -207,3 +207,19 @@
 #
 # Default value: true
 #enable_password_signups = true
+
+# How long between requests a session should be valid for before expiring.
+#
+# For example, if a user logs in and then does nothing until the session expires, they will
+# have to log in again before accessing NovelNote.
+#
+# See the [`jiff` "friendly" format] for examples of how this may be specified.
+#
+# The default is 2 hours. The maximum is 1 week.
+#
+# [`jiff` "friendly" format]: https://docs.rs/jiff/latest/jiff/fmt/friendly/index.html
+#
+# Can also be specified via environment variable `SESSION_LENGTH`.
+#
+# Default value: "2 hours"
+#session_length = "2 hours"
