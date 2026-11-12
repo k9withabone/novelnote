@@ -340,13 +340,14 @@ async fn run_servers(
     }: Config,
     dirs: &ProjectDirs,
 ) -> Result<(), Report> {
+    let database_directory = database.directory(dirs);
     let database = database
         .open(dirs)
         .await
         .wrap_err("error opening database")?;
 
     let http_server = http
-        .try_into_server(database.clone())
+        .try_into_server(database_directory, database.clone())
         .await
         .wrap_err("error creating HTTP server")?;
 

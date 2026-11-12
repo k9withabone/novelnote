@@ -223,3 +223,22 @@
 #
 # Default value: "2 hours"
 #session_length = "2 hours"
+
+# Path to a secret key used for securing session cookies, tokens, and as a password pepper.
+#
+# If the secret key is changed, all existing sessions, tokens, and passwords become invalid.
+#
+# Secret keys must be at least 64 bytes and smaller than 4 GiB.
+#
+# If not set, NovelNote will first check the directory specified by the
+# `CREDENTIALS_DIRECTORY` environment variable, if set (e.g. by systemd), for a `secret_key`
+# or `novelnote_secret_key` file. Then, it will check the `/run/secrets` directory (used for
+# Podman / Docker secrets), if it exists, for the same files. Finally, it will use a
+# `secret_key` file in the database directory as a default.
+#
+# If the specified or default file does not exist, a minimum sized secret key is generated
+# and written to a new file. Make sure that this generated secret key is persisted or any
+# created sessions, tokens, or passwords will be invalid when NovelNote is restarted.
+#
+# Can also be specified via environment variable `SECRET_KEY_FILE`.
+#secret_key_file =
