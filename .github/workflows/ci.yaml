@@ -172,7 +172,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Generate config template
-        run: cargo run --verbose -- config-template --overwrite novelnote-example.toml 
+        run: cargo run --verbose -- generate config-template --overwrite novelnote-example.toml 
 
       - name: Check diff
         run: git diff --exit-code novelnote-example.toml

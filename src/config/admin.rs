@@ -77,7 +77,7 @@ pub(crate) struct AdminConfig {
 
 /// [`AdminConfig`] nested in the `[admin]` table.
 ///
-/// Used for deserializing a part of a [`Config`] file.
+/// Used for deserializing a part of a [`Config`](super::Config) file.
 #[derive(confique::Config)]
 struct NestedAdminConfig {
     /// Admin socket configuration.

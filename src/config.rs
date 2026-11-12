@@ -197,7 +197,30 @@ pub(crate) struct DatabaseConfig {
     pub backup: DatabaseBackupConfig,
 }
 
+/// [`DatabaseConfig`] nested in the `[database]` table.
+///
+/// Used for deserializing a part of a [`Config`] file.
+#[derive(confique::Config)]
+struct NestedDatabaseConfig {
+    /// Database configuration.
+    #[config(nested)]
+    database: DatabaseConfig,
+}
+
 impl DatabaseConfig {
+    /// Load database config from environment variables and config files.
+    ///
+    /// If a config file path is provided, only that file is read. Otherwise, several OS standard
+    /// locations and the current working directory are checked for config files.
+    pub(crate) fn load(
+        config_file: Option<PathBuf>,
+        dirs: &ProjectDirs,
+    ) -> Result<Self, confique::Error> {
+        let NestedDatabaseConfig { database } =
+            load_config(confique::Layer::from_env()?, config_file, dirs)?;
+        Ok(database)
+    }
+
     /// Get the set database directory or the default.
     pub(crate) fn directory<'a>(&'a self, dirs: &'a ProjectDirs) -> &'a Path {
         self.directory.as_deref().unwrap_or_else(|| dirs.data_dir())

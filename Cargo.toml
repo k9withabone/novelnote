@@ -201,6 +201,11 @@ tracing-error.workspace = true
 tracing-journald = "0.3.2"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
+[dependencies.inquire]
+version = "0.9.4"
+default-features = false
+features = ["crossterm"]
+
 [dependencies.tokio]
 workspace = true
 features = ["fs", "macros", "rt-multi-thread", "signal", "sync"]
