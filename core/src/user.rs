@@ -280,6 +280,34 @@ pub struct SignupCredentials {
     pub password: Secret,
 }
 
+/// Credentials logging in to NovelNote using a password.
+///
+/// Request body for the `POST /api/auth/login` route.
+#[derive(
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[cfg_attr(
+    feature = "utoipa",
+    schema(description = "Credentials logging in to NovelNote using a password.")
+)]
+#[rkyv(derive(Debug, PartialEq, Eq), compare(PartialEq))]
+pub struct LoginCredentials {
+    /// User's username.
+    pub username: Username,
+
+    /// User's password.
+    pub password: Secret,
+}
+
 /// [`User`] and token for an authenticated [`Session`].
 ///
 /// Response body the `POST /api/auth/login` and `POST /api/auth/signup` routes.
