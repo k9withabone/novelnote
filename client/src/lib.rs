@@ -313,7 +313,6 @@ pub enum DeserializeError {
 mod tests {
     use std::{
         collections::HashSet,
-        error::Error,
         path::{Path, PathBuf},
         time::Duration,
     };
@@ -326,13 +325,15 @@ mod tests {
 
     use super::*;
 
+    pub(crate) type BoxedError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
     /// Bind a [`Server`] to a Unix domain socket at `path` in a temporary directory, connect a
     /// [`Client`] to it, and execute the closure.
     pub(crate) async fn with_client<P, F, T>(
         path: P,
         database: Database,
         f: F,
-    ) -> Result<T, Box<dyn Error>>
+    ) -> Result<T, BoxedError>
     where
         P: AsRef<Path>,
         F: AsyncFnOnce(Client) -> T,
@@ -370,7 +371,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn health_check() -> Result<(), Box<dyn Error>> {
+    async fn health_check() -> Result<(), BoxedError> {
         with_client(
             "test_health_check",
             Database::open_in_memory(1).await?,

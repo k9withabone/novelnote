@@ -5,7 +5,10 @@ use std::sync::Arc;
 pub use novelnote_core::user::{PasswordScore, WeakPasswordError};
 use novelnote_core::{
     Secret,
-    user::{Authenticated, InvalidSignupCredentials, ScorePasswordParameters, SignupCredentials},
+    user::{
+        Authenticated, InvalidSignupCredentials, LoginCredentials, ScorePasswordParameters,
+        SignupCredentials,
+    },
 };
 use reqwest::StatusCode;
 use thiserror::Error;
@@ -100,6 +103,41 @@ impl Auth<'_> {
             _ => Err(UnexpectedError::new(response).await.into()),
         }
     }
+
+    /// Log in to an existing [`User`](novelnote_core::User) account using a password.
+    ///
+    /// Setting `cookie_authentication` to `true` causes the returned [`AuthenticatedClient`] to
+    /// depend on an `HttpOnly` cookie set by the server for authentication. If the
+    /// [`reqwest::Client`] this [`Client`] was created with does not have a cookie store enabled
+    /// (or provided by a browser), then all calls with the [`AuthenticatedClient`] will fail.
+    ///
+    /// Sends a `POST` request to `/api/auth/login`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request cannot be sent, the response body cannot be deserialized,
+    /// the credentials were incorrect (username or password), or the server returned an unexpected
+    /// response.
+    pub async fn login(
+        &self,
+        credentials: &LoginCredentials,
+        cookie_authentication: bool,
+    ) -> Result<AuthenticatedClient, LoginError> {
+        let response = self.client.post_body("api/auth/login", credentials).await?;
+
+        match response.status() {
+            StatusCode::OK if response.is_rkyv() => {
+                let Authenticated { user, token } = response.rkyv().await?;
+                Ok(AuthenticatedClient {
+                    client: self.client.clone(),
+                    token: (!cookie_authentication).then(|| Arc::from(token)),
+                    user: Arc::new(user),
+                })
+            }
+            StatusCode::UNAUTHORIZED => Err(LoginError::InvalidCredentials),
+            _ => Err(UnexpectedError::new(response).await.into()),
+        }
+    }
 }
 
 /// Error returned from [`Auth::score_password()`].
@@ -146,14 +184,34 @@ pub enum SignupError {
     Unexpected(#[from] UnexpectedError),
 }
 
+/// Error returned from [`Auth::login()`].
+#[derive(Error, Debug)]
+pub enum LoginError {
+    /// Error sending request.
+    #[error("error sending request")]
+    Send(#[from] PostError),
+
+    /// Error deserializing response body.
+    #[error("error deserializing response body")]
+    Deserialize(#[from] DeserializeError),
+
+    /// The credentials (username or password) was incorrect.
+    #[error("username or password was incorrect")]
+    InvalidCredentials,
+
+    /// Unexpected response from the server.
+    #[error("unexpected response from the server")]
+    Unexpected(#[from] UnexpectedError),
+}
+
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
-    use std::{assert_matches, error::Error};
+    use std::assert_matches;
 
     use novelnote_database::Database;
 
-    use crate::tests::with_client;
+    use crate::tests::{BoxedError, with_client};
 
     use super::*;
 
@@ -163,7 +221,7 @@ mod tests {
         use super::*;
 
         #[tokio::test]
-        async fn ok() -> Result<(), Box<dyn Error>> {
+        async fn ok() -> Result<(), BoxedError> {
             let score = with_client(
                 "test_score_password_ok",
                 Database::open_in_memory(1).await?,
@@ -182,7 +240,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn weak_password_err() -> Result<(), Box<dyn Error>> {
+        async fn weak_password_err() -> Result<(), BoxedError> {
             let result = with_client(
                 "test_score_password_weak_password_err",
                 Database::open_in_memory(1).await?,
@@ -220,7 +278,7 @@ mod tests {
 
         use super::*;
 
-        async fn database_with_user() -> Result<(Database, NewUser), Box<dyn Error>> {
+        async fn database_with_user() -> Result<(Database, NewUser), BoxedError> {
             let database = Database::open_in_memory(1).await?;
 
             let new_user = NewUser {
@@ -238,7 +296,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn created() -> Result<(), Box<dyn Error>> {
+        async fn created() -> Result<(), BoxedError> {
             let credentials = SignupCredentials {
                 username: "test".parse()?,
                 display_name: Some("test".parse()?),
@@ -263,7 +321,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn weak_password_err() -> Result<(), Box<dyn Error>> {
+        async fn weak_password_err() -> Result<(), BoxedError> {
             let credentials = SignupCredentials {
                 username: "test".parse()?,
                 display_name: None,
@@ -292,7 +350,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn existing_username_err() -> Result<(), Box<dyn Error>> {
+        async fn existing_username_err() -> Result<(), BoxedError> {
             let (database, new_user) = database_with_user().await?;
 
             let credentials = SignupCredentials {
@@ -320,7 +378,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn existing_email_err() -> Result<(), Box<dyn Error>> {
+        async fn existing_email_err() -> Result<(), BoxedError> {
             let (database, new_user) = database_with_user().await?;
 
             let credentials = SignupCredentials {
@@ -346,7 +404,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn disabled_err() -> Result<(), Box<dyn Error>> {
+        async fn disabled_err() -> Result<(), BoxedError> {
             let temp_dir = TempDir::new()?;
             let path = temp_dir
                 .path()
@@ -391,6 +449,68 @@ mod tests {
             temp_dir.close()?;
 
             assert_matches!(result, Err(SignupError::Disabled));
+
+            Ok(())
+        }
+    }
+
+    mod login {
+        use std::path::Path;
+
+        use super::*;
+
+        async fn signup_and_then<T>(
+            path: impl AsRef<Path>,
+            f: impl AsyncFnOnce(Client, LoginCredentials) -> T,
+        ) -> Result<T, BoxedError> {
+            let signup_credentials = SignupCredentials {
+                username: "test".parse()?,
+                display_name: None,
+                email: None,
+                password: STRONG_PASSWORD.into(),
+            };
+
+            let login_credentials = LoginCredentials {
+                username: signup_credentials.username.clone(),
+                password: signup_credentials.password.clone(),
+            };
+
+            with_client(path, Database::open_in_memory(1).await?, async |client| {
+                client.auth().signup(&signup_credentials, false).await?;
+                Ok(f(client, login_credentials).await)
+            })
+            .await?
+        }
+
+        #[tokio::test]
+        async fn ok() -> Result<(), BoxedError> {
+            let (username, client) =
+                signup_and_then("test_login_ok", async |client, credentials| {
+                    client
+                        .auth()
+                        .login(&credentials, false)
+                        .await
+                        .map(|client| (credentials.username, client))
+                })
+                .await??;
+
+            assert_eq!(client.user.username, username);
+
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn invalid_credentials_err() -> Result<(), BoxedError> {
+            let result = signup_and_then(
+                "test_login_invalid_credentials_err",
+                async |client, mut credentials| {
+                    credentials.password = "test".into();
+                    client.auth().login(&credentials, false).await
+                },
+            )
+            .await?;
+
+            assert_matches!(result, Err(LoginError::InvalidCredentials));
 
             Ok(())
         }
