@@ -21,12 +21,14 @@ RUN rustup target add "$(cat /rust_target.txt)"
 FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY admin/Cargo.toml ./admin/
+COPY client/Cargo.toml ./client/
 COPY core/Cargo.toml ./core/
 COPY database/Cargo.toml ./database/
 COPY server/Cargo.toml ./server/
 COPY web/Cargo.toml ./web/
 COPY src ./src
 COPY admin/src ./admin/src
+COPY client/src ./client/src
 COPY core/src ./core/src
 COPY database/src ./database/src
 COPY server/src ./server/src
