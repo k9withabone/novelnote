@@ -4,7 +4,7 @@ mod token;
 
 use std::{convert::Infallible, time::Duration};
 
-use argon2::{Argon2, PasswordHasher, password_hash};
+use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash};
 use axum::{
     Extension,
     extract::{FromRequestParts, State},
@@ -16,11 +16,12 @@ use itertools::{Itertools, chain};
 use novelnote_core::{
     Name, Secret, User,
     user::{
-        Authenticated, EmailAddress, InvalidSignupCredentials, PasswordScore,
+        Authenticated, EmailAddress, InvalidSignupCredentials, LoginCredentials, PasswordScore,
         ScorePasswordParameters, SignupCredentials, WeakPasswordError, score_password,
     },
 };
 use novelnote_database::{
+    ExecuteError,
     sessions::{self, NewSession},
     users::{self, Authentication, NewUser},
 };
@@ -55,6 +56,7 @@ pub(super) fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::default()
         .routes(routes!(score_password_strength))
         .routes(routes!(signup))
+        .routes(routes!(login))
 }
 
 /// Configuration required for `/api/auth` routes.
@@ -290,6 +292,125 @@ impl IntoResponse for SignupError {
     }
 }
 
+/// Login
+///
+/// Log in to an existing user account using a password.
+#[utoipa::path(
+    post,
+    path = "/login",
+    tag = TAG,
+    request_body = LoginCredentials,
+    responses(
+        (status = OK, description = "Log in successful.", body = Authenticated),
+        (status = UNAUTHORIZED, description = "Invalid credentials."),
+        ClientErrorResponse,
+        InternalServerErrorResponse,
+    ),
+)]
+#[tracing::instrument(level = "debug", skip_all)]
+async fn login(
+    State(AppState {
+        auth_config:
+            Config {
+                password_signup_enabled: _,
+                secret_key,
+                session_length: expires_in,
+            },
+        database,
+    }): State<AppState>,
+    Extension(ClientIp(ip_address)): Extension<ClientIp>,
+    UserAgent(user_agent): UserAgent,
+    cookies: PrivateCookieJar,
+    content_type: ResponseContentType,
+    RequestBody(LoginCredentials { username, password }): RequestBody<LoginCredentials>,
+) -> Result<(StatusCode, PrivateCookieJar, ResponseBody<Authenticated>), LoginError> {
+    let Some((user, password_hash)) = database
+        .users()
+        .user_and_password_hash_by_username(username)
+        .await?
+    else {
+        // Check against a default password hash to mitigate timing attacks.
+        verify_password(
+            password,
+            "$argon2id\
+             $v=19\
+             $m=19456,t=2,p=1\
+             $ozpbTdQG5lDNvCZxo7/BDQ$pB6nPG31rYu15XKnE+EvCbs+5Yc8VKRBn1VtpwZK8Jg"
+                .to_owned(),
+            secret_key,
+        )
+        .await?;
+
+        return Err(LoginError::InvalidCredentials);
+    };
+
+    if !verify_password(password, password_hash, secret_key.clone()).await? {
+        return Err(LoginError::InvalidCredentials);
+    }
+
+    let session_id = Uuid::now_v7();
+    let session = NewSession {
+        id: session_id,
+        user_id: user.id,
+        ip_address,
+        user_agent,
+        expires_in,
+    };
+
+    database.sessions().insert(session).await?;
+    debug!(session.id = %session_id, "new session");
+
+    let cookies = cookies.add(cookie(&session_id, expires_in));
+
+    let auth = Authenticated {
+        user,
+        token: Token::Session(session_id).encrypt(secret_key.as_ref()),
+    };
+
+    Ok((StatusCode::OK, cookies, content_type.into_body(auth)))
+}
+
+/// Error returned when [`login()`] fails.
+#[derive(Error, Debug)]
+enum LoginError {
+    /// Error getting [`User`] and password hash from the database.
+    #[error("error getting user and password hash from the database")]
+    RetrievalError(#[from] ExecuteError),
+
+    /// Invalid credentials.
+    #[error("invalid credentials")]
+    InvalidCredentials,
+
+    /// Error hashing password.
+    #[error("error hashing password")]
+    HashPassword(#[from] password_hash::Error),
+
+    /// Error inserting new session into the database.
+    #[error("error inserting new session into the database")]
+    SessionInsert(#[from] sessions::InsertError),
+}
+
+impl IntoResponse for LoginError {
+    fn into_response(self) -> Response {
+        match &self {
+            Self::RetrievalError(error) => {
+                error!(?error, "{self}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Self::InvalidCredentials => StatusCode::UNAUTHORIZED,
+            Self::HashPassword(error) => {
+                error!(?error, message = %error, "{self} for login");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+            Self::SessionInsert(error) => {
+                error!(?error, "{self}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        }
+        .into_response()
+    }
+}
+
 /// Extractor for optionally getting the `User-Agent` header from a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct UserAgent(Option<String>);
@@ -329,6 +450,31 @@ async fn hash_password(
     })
     .await
     .expect("`argon2` panicked")
+}
+
+/// Check if a password matches the expected hash.
+///
+/// Returns `Ok(true)` if it matches and `Ok(false)` if the password in invalid.
+///
+/// # Errors
+///
+/// Returns an error if the password hash cannot be parsed as a
+/// [`PasswordHash`](password_hash::phc::PasswordHash) or the password is longer than 4 GiB.
+async fn verify_password(
+    password: Secret,
+    password_hash: String,
+    pepper: SecretKey,
+) -> Result<bool, password_hash::Error> {
+    match spawn_blocking(move || {
+        argon2(&pepper).verify_password(password.reveal_bytes(), password_hash.as_str())
+    })
+    .await
+    .expect("`argon2` panicked")
+    {
+        Ok(()) => Ok(true),
+        Err(password_hash::Error::PasswordInvalid) => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// Create a new [`Argon2`] instance using a pepper and the default parameters.
