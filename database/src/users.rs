@@ -88,6 +88,40 @@ impl Users<'_> {
             .await
     }
 
+    /// Get a [`User`] and their password hash from the database using the user's username.
+    ///
+    /// Returns [`None`] if the user does not exist or they do not have a password set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database is closed or SQLite returned an error.
+    pub async fn user_and_password_hash_by_username(
+        &self,
+        username: Username,
+    ) -> Result<Option<(User, String)>, ExecuteError> {
+        self.database
+            .query_optional(
+                "SELECT id, display_name, password_hash FROM users WHERE username = ?1",
+                username.clone(),
+                |row| {
+                    row.get::<_, Option<String>>(2)?
+                        .map(|password_hash| {
+                            Ok((
+                                User {
+                                    id: row.get(0)?,
+                                    username,
+                                    display_name: row.parse_str_or_none(1)?,
+                                },
+                                password_hash,
+                            ))
+                        })
+                        .transpose()
+                },
+            )
+            .await
+            .map(Option::flatten)
+    }
+
     /// Delete a user from the database.
     ///
     /// # Errors
@@ -296,13 +330,13 @@ mod tests {
                 username: Username::new("test2")?,
                 display_name: None,
             },
-            email: new_user.email,
-            authentication: Authentication::PasswordHash("hash".to_owned()),
+            email: None,
+            authentication: new_user.authentication,
         };
 
         assert_matches!(
             database.users().insert(new_user).await,
-            Err(InsertError::Duplicate(UniqueColumn::Email)),
+            Err(InsertError::Duplicate(UniqueColumn::OpenId)),
         );
 
         Ok(())
@@ -318,13 +352,13 @@ mod tests {
                 username: Username::new("test2")?,
                 display_name: None,
             },
-            email: None,
-            authentication: new_user.authentication,
+            email: new_user.email,
+            authentication: Authentication::PasswordHash("hash".to_owned()),
         };
 
         assert_matches!(
             database.users().insert(new_user).await,
-            Err(InsertError::Duplicate(UniqueColumn::OpenId)),
+            Err(InsertError::Duplicate(UniqueColumn::Email)),
         );
 
         Ok(())
@@ -339,6 +373,51 @@ mod tests {
 
         database.users().delete(id).await?;
         assert_eq!(database.users().by_id(id).await?, None);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn user_and_password_hash_by_username() -> Result<(), Box<dyn Error>> {
+        let (database, new_user) = setup().await?;
+
+        assert_eq!(
+            database
+                .users()
+                .user_and_password_hash_by_username(new_user.user.username.clone())
+                .await?,
+            None,
+        );
+
+        let username = Username::new("test2")?;
+        assert_eq!(
+            database
+                .users()
+                .user_and_password_hash_by_username(username.clone())
+                .await?,
+            None
+        );
+
+        let user = User {
+            id: Uuid::from_u128(1),
+            username,
+            display_name: None,
+        };
+        let password_hash = "hash".to_owned();
+        let new_user = NewUser {
+            user: user.clone(),
+            email: None,
+            authentication: Authentication::PasswordHash(password_hash.clone()),
+        };
+
+        database.users().insert(new_user).await?;
+        assert_eq!(
+            database
+                .users()
+                .user_and_password_hash_by_username(user.username.clone())
+                .await?,
+            Some((user, password_hash)),
+        );
 
         Ok(())
     }

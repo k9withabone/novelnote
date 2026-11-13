@@ -178,6 +178,28 @@ impl Database {
             .map_err(ExecuteError::from_rusqlite)
     }
 
+    /// Execute a SQL query that may return a single row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database is closed, SQLite returned an error, or more than one row
+    /// was returned.
+    async fn query_optional<P, F, T>(
+        &self,
+        sql: &'static str,
+        params: P,
+        map_fn: F,
+    ) -> Result<Option<T>, ExecuteError>
+    where
+        P: AsParams + Send + 'static,
+        F: FnOnce(&Row<'_>) -> Result<T, rusqlite::Error> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.call(move |connection| connection.query_optional(sql, params, map_fn))
+            .await?
+            .map_err(ExecuteError::from_rusqlite)
+    }
+
     /// Execute a cached SQL query that may return a single row.
     ///
     /// # Errors
@@ -465,6 +487,23 @@ trait RusqliteConnectionExt {
     ) -> Result<T, rusqlite::Error> {
         self.prepare(sql)?
             .query_one(params.as_params(), |row| row.get(0))
+    }
+
+    /// Execute a SQL query that may return a single row.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if binding the parameters fails, SQLite returned an error, or more than one
+    /// row was returned.
+    fn query_optional<T>(
+        &self,
+        sql: &str,
+        params: impl AsParams,
+        map_fn: impl FnOnce(&Row<'_>) -> Result<T, rusqlite::Error>,
+    ) -> Result<Option<T>, rusqlite::Error> {
+        self.prepare(sql)?
+            .query_one(params.as_params(), map_fn)
+            .optional()
     }
 
     /// Execute a cached SQL query that may return a single row.
