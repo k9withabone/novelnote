@@ -17,7 +17,7 @@ use novelnote_database::Database;
 use novelnote_server::{SecretKey, Server};
 use serde::{Deserialize, Deserializer, de};
 use tokio::task::spawn_blocking;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::{Timeout, create_parent_dir};
 
@@ -245,9 +245,13 @@ async fn default_secret_key_file(database_directory: &Path) -> PathBuf {
 /// created.
 async fn read_secret_key_or_generate(path: &Path) -> Result<SecretKey, Report> {
     match tokio::fs::read(path).await {
-        Ok(bytes) => bytes
-            .try_into()
-            .wrap_err_with(|| format!("error reading file `{}` as secret key", path.display())),
+        Ok(bytes) => {
+            let secret_key = bytes.try_into().wrap_err_with(|| {
+                format!("error reading file `{}` as secret key", path.display())
+            })?;
+            debug!(path = %path.display(), "read secret key from file");
+            Ok(secret_key)
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let secret_key = SecretKey::generate();
             if let Err(error) = tokio::fs::write(path, &secret_key).await {
