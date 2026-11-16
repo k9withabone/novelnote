@@ -13,9 +13,9 @@ use std::{
 };
 
 use axum::{
-    Router,
-    extract::{ConnectInfo, FromRef},
-    http::{HeaderName, Request, StatusCode},
+    Extension, Router,
+    extract::{ConnectInfo, FromRef, FromRequestParts, rejection::ExtensionRejection},
+    http::{HeaderName, Request, StatusCode, request::Parts},
 };
 use axum_extra::extract::cookie;
 use itertools::{Either, Itertools};
@@ -115,7 +115,7 @@ impl Server {
         };
 
         let router = Router::new()
-            .nest(api::PATH, api::router())
+            .nest(api::PATH, api::router(state.clone()))
             .layer((
                 ClientIp::layer(trusted_proxies),
                 trace_layer(),
@@ -381,6 +381,12 @@ impl FromRef<AppState> for AuthConfig {
     }
 }
 
+impl AsRef<SecretKey> for AppState {
+    fn as_ref(&self) -> &SecretKey {
+        &self.auth_config.secret_key
+    }
+}
+
 impl FromRef<AppState> for Database {
     fn from_ref(input: &AppState) -> Self {
         input.database.clone()
@@ -438,6 +444,16 @@ impl ClientIp {
         let client_ip = proxies.find_or_last(|proxy| !trusted_proxies.contains(proxy));
 
         Self(client_ip)
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
+    type Rejection = ExtensionRejection;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Extension::from_request_parts(parts, state)
+            .await
+            .map(|Extension(client_ip)| client_ip)
     }
 }
 

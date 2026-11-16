@@ -2,13 +2,13 @@
 
 mod token;
 
-use std::{convert::Infallible, time::Duration};
+use std::{collections::BTreeMap, convert::Infallible, time::Duration};
 
 use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash};
 use axum::{
-    Extension,
-    extract::{FromRequestParts, State},
+    extract::{FromRequestParts, Request, State},
     http::{HeaderValue, StatusCode, header::USER_AGENT, request::Parts},
+    middleware::Next,
     response::{IntoResponse, Response},
 };
 use axum_extra::extract::{PrivateCookieJar, cookie::Cookie};
@@ -28,7 +28,9 @@ use novelnote_database::{
 use thiserror::Error;
 use time::SignedDuration;
 use tokio::task::spawn_blocking;
+use tower::{Layer, Service};
 use tracing::{debug, error, info, instrument};
+use utoipa::openapi::{Content, Object, Ref, RefOr, Type, response::Response as OpenApiResponse};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
@@ -49,7 +51,7 @@ pub(super) const PATH: &str = "/auth";
 pub(super) const TAG: &str = "auth";
 
 /// Name of the cookie that a session's ID is stored in.
-const COOKIE_NAME: &str = "__HOST-session_id";
+pub(super) const SESSION_COOKIE: &str = "__HOST-session_id";
 
 /// Router for `/api/auth`.
 pub(super) fn router() -> OpenApiRouter<AppState> {
@@ -57,6 +59,52 @@ pub(super) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(score_password_strength))
         .routes(routes!(signup))
         .routes(routes!(login))
+}
+
+/// [`tower::Layer`] for applying middleware to routes requiring authentication.
+///
+/// The middleware adds a [`UserId`] extension to the [`Request`] if it has a valid and unexpired
+/// session cookie or bearer token. Otherwise the request is rejected with a `401 Unauthorized`
+/// status.
+pub(super) fn layer<S>(
+    state: AppState,
+) -> impl Layer<
+    S,
+    Service: Service<Request, Response = Response, Error = Infallible, Future: Send>
+                 + Clone
+                 + Send
+                 + Sync,
+> + Clone
+where
+    S: Service<Request, Error = Infallible> + Clone + Send + Sync + 'static,
+    S::Response: IntoResponse,
+    S::Future: Send,
+{
+    axum::middleware::from_fn_with_state(state, middleware)
+}
+
+/// Extractor for getting the ID of the authenticated user.
+///
+/// Requires that the authentication [`layer()`] was used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct UserId(pub(super) Uuid);
+
+impl<S> FromRequestParts<S> for UserId {
+    type Rejection = StatusCode;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        let response = parts.extensions.get().copied().ok_or_else(|| {
+            error!(
+                "attempted to get an authenticated user ID for a route not covered by the \
+                 authentication middleware",
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        });
+        std::future::ready(response)
+    }
 }
 
 /// Configuration required for `/api/auth` routes.
@@ -70,6 +118,174 @@ pub(crate) struct Config {
 
     /// How long between requests a session should be valid for before expiring.
     pub(crate) session_length: Duration,
+}
+
+/// Middleware for requiring user authentication.
+///
+/// Adds a [`UserId`] extension to the request before calling the next operation in the stack if
+/// the session ID in the session cookie or bearer token corresponds to a unexpired session.
+///
+/// # Errors
+///
+/// Returns an error response if the cookie or token value is invalid, a session cookie or bearer
+/// token wasn't provided, the session ID from the cookie and token do not match, the session is
+/// expired, or a database error occurred.
+#[expect(
+    clippy::result_large_err,
+    reason = "cookie jar required in all responses"
+)]
+#[tracing::instrument(level = "trace", skip_all)]
+async fn middleware(
+    State(AppState {
+        auth_config: Config {
+            session_length: expires_in,
+            ..
+        },
+        database,
+    }): State<AppState>,
+    mut cookies: PrivateCookieJar,
+    token: Option<Token>,
+    ClientIp(ip_address): ClientIp,
+    UserAgent(user_agent): UserAgent,
+    mut request: Request,
+    next: Next,
+) -> Result<(PrivateCookieJar, Response), (PrivateCookieJar, AuthenticationError)> {
+    // Parse session ID from session cookie.
+    let session_cookie = if let Some(cookie) = cookies.get(SESSION_COOKIE) {
+        if let Ok(session_id) = cookie.value().parse() {
+            Some((cookie, session_id))
+        } else {
+            return Err((cookies.remove(cookie), AuthenticationError::CookieParse));
+        }
+    } else {
+        None
+    };
+
+    // If bearer token and session cookie are both set, make sure they match.
+    let (session_id, session_cookie) = match (token, session_cookie) {
+        (None, None) => return Err((cookies, AuthenticationError::Missing)),
+        (None, Some((cookie, session_id))) => (session_id, Some(cookie)),
+        (Some(Token::Session(session_id)), None) => (session_id, None),
+        (Some(Token::Session(token_session_id)), Some((cookie, cookie_session_id))) => {
+            if token_session_id == cookie_session_id {
+                (token_session_id, Some(cookie))
+            } else {
+                return Err((cookies.remove(cookie), AuthenticationError::Mismatch));
+            }
+        }
+    };
+
+    // Get the user ID for the session, checking if the session has expired and update it if not.
+    let session_update = sessions::Update {
+        ip_address,
+        user_agent,
+        expires_in,
+    };
+    let user_id = match database
+        .sessions()
+        .user_id_and_update(session_id, session_update)
+        .await
+    {
+        Ok(Some(user_id)) => user_id,
+        Ok(None) => {
+            if let Some(cookie) = session_cookie {
+                cookies = cookies.remove(cookie);
+            }
+            return Err((cookies, AuthenticationError::Expired));
+        }
+        Err(error) => return Err((cookies, error.into())),
+    };
+
+    // Add the authenticated user ID to the request extensions for use in routes.
+    request.extensions_mut().insert(UserId(user_id));
+
+    // Refresh cookie expiration.
+    if session_cookie.is_some() {
+        cookies = cookies.add(cookie(&session_id, expires_in));
+    }
+
+    Ok((cookies, next.run(request).await))
+}
+
+/// Error returned when the authentication [`middleware()`] fails.
+///
+/// Can also be used as a response in an [`OpenApi`](utoipa::openapi::OpenApi) document.
+#[derive(Debug)]
+pub(super) enum AuthenticationError {
+    /// Error parsing cookie value as [`Uuid`].
+    CookieParse,
+
+    /// Request did not have a session cookie or bearer token.
+    Missing,
+
+    /// Session ID from the session cookie did not match the one from the bearer token.
+    Mismatch,
+
+    /// Session is expired.
+    Expired,
+
+    /// Database error while retrieving user ID from session or updating the session.
+    Database(ExecuteError),
+}
+
+impl AuthenticationError {
+    /// Name used when referencing this response in the OpenAPI document.
+    const RESPONSE_NAME: &str = "AuthenticationError";
+}
+
+impl From<ExecuteError> for AuthenticationError {
+    fn from(value: ExecuteError) -> Self {
+        Self::Database(value)
+    }
+}
+
+impl IntoResponse for AuthenticationError {
+    fn into_response(self) -> Response {
+        let message = match self {
+            Self::CookieParse => "error parsing session ID from cookie",
+            Self::Missing => "session cookie or bearer token is required for authentication",
+            Self::Mismatch => "session ID from cookie did not match bearer token",
+            Self::Expired => "session is expired",
+            Self::Database(error) => {
+                error!(
+                    ?error,
+                    "database error while getting session's user ID or updating it"
+                );
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+        (StatusCode::UNAUTHORIZED, message).into_response()
+    }
+}
+
+impl utoipa::IntoResponses for AuthenticationError {
+    fn responses() -> BTreeMap<String, RefOr<OpenApiResponse>> {
+        let status = StatusCode::UNAUTHORIZED;
+        let response = Ref::from_response_name(Self::RESPONSE_NAME);
+
+        [(status.as_str().to_owned(), response.into())].into()
+    }
+}
+
+impl utoipa::ToResponse<'static> for AuthenticationError {
+    fn response() -> (&'static str, RefOr<OpenApiResponse>) {
+        let schema = Object::builder()
+            .schema_type(Type::String)
+            .description(Some("The body will contain a description of the error."));
+
+        let response = OpenApiResponse::builder()
+            .description("Authentication is missing, invalid, or session expired.")
+            .content(
+                mime::TEXT_PLAIN_UTF_8.as_ref(),
+                Content::builder()
+                    .schema(Some(schema))
+                    .example(Some("session is expired".into())),
+            )
+            .build();
+
+        (Self::RESPONSE_NAME, response.into())
+    }
 }
 
 /// Score a Password's Strength
@@ -104,17 +320,22 @@ async fn score_password_strength(
         password,
         user_inputs,
     }): RequestBody<ScorePasswordParameters>,
-) -> impl IntoResponse {
+) -> Result<ResponseBody<PasswordScore>, (StatusCode, ResponseBody<WeakPasswordError>)> {
     let user_inputs = user_inputs.iter().map(String::as_str).collect_vec();
 
     score_password(password.reveal(), &user_inputs)
-        .map(|score| (StatusCode::OK, content_type.into_body(score)))
+        .map(|score| content_type.into_body(score))
         .map_err(|error| (StatusCode::BAD_REQUEST, content_type.into_body(error)))
 }
 
 /// Signup
 ///
 /// Create a new user and log in to the new account.
+///
+/// On success, sets an `HttpOnly` cookie that can be used for authentication. If the client does
+/// not support cookies, a bearer token is included in the response body that can be used in a
+/// [`Authorization`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Authorization)
+/// header.
 #[utoipa::path(
     post,
     path = "/signup",
@@ -143,7 +364,7 @@ async fn signup(
             },
         database,
     }): State<AppState>,
-    Extension(ClientIp(ip_address)): Extension<ClientIp>,
+    ClientIp(ip_address): ClientIp,
     UserAgent(user_agent): UserAgent,
     cookies: PrivateCookieJar,
     content_type: ResponseContentType,
@@ -295,6 +516,11 @@ impl IntoResponse for SignupError {
 /// Login
 ///
 /// Log in to an existing user account using a password.
+///
+/// On success, sets an `HttpOnly` cookie that can be used for authentication. If the client does
+/// not support cookies, a bearer token is included in the response body that can be used in a
+/// [`Authorization`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Authorization)
+/// header.
 #[utoipa::path(
     post,
     path = "/login",
@@ -318,12 +544,12 @@ async fn login(
             },
         database,
     }): State<AppState>,
-    Extension(ClientIp(ip_address)): Extension<ClientIp>,
+    ClientIp(ip_address): ClientIp,
     UserAgent(user_agent): UserAgent,
     cookies: PrivateCookieJar,
     content_type: ResponseContentType,
     RequestBody(LoginCredentials { username, password }): RequestBody<LoginCredentials>,
-) -> Result<(StatusCode, PrivateCookieJar, ResponseBody<Authenticated>), LoginError> {
+) -> Result<(PrivateCookieJar, ResponseBody<Authenticated>), LoginError> {
     let Some((user, password_hash)) = database
         .users()
         .user_and_password_hash_by_username(username)
@@ -367,7 +593,7 @@ async fn login(
         token: Token::Session(session_id).encrypt(secret_key.as_ref()),
     };
 
-    Ok((StatusCode::OK, cookies, content_type.into_body(auth)))
+    Ok((cookies, content_type.into_body(auth)))
 }
 
 /// Error returned when [`login()`] fails.
@@ -492,7 +718,7 @@ fn argon2(pepper: &SecretKey) -> Argon2<'_> {
 
 /// Construct a [`Cookie`] to store a session ID.
 fn cookie(session_id: &Uuid, max_age: Duration) -> Cookie<'static> {
-    Cookie::build((COOKIE_NAME, session_id.as_simple().to_string()))
+    Cookie::build((SESSION_COOKIE, session_id.as_simple().to_string()))
         .http_only(true)
         .max_age(max_age.try_into().unwrap_or(SignedDuration::MAX))
         .secure(true)

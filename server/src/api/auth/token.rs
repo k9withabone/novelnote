@@ -3,8 +3,14 @@
 use std::sync::LazyLock;
 
 use aes_gcm::{AeadCore, AeadInPlace, Aes256Gcm, KeyInit, KeySizeUser};
+use axum::{
+    extract::OptionalFromRequestParts,
+    http::{StatusCode, header::AUTHORIZATION, request::Parts},
+    response::IntoResponse,
+};
 use base64::{Engine, engine::general_purpose::NO_PAD};
 use thiserror::Error;
+use tracing::error;
 use typenum::Unsigned;
 use uuid::Uuid;
 
@@ -95,13 +101,6 @@ impl Token {
     ///
     /// Returns an error if the token cannot be decoded or decrypted, is not the correct length,
     /// or it is of an unknown variant.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "will be used for authentication, needed now for testing"
-        )
-    )]
     pub(super) fn decrypt(input: &str, key: &Key) -> Result<Self, TokenDecryptionError> {
         let mut buf = [0; Self::ENCRYPTED_LEN];
 
@@ -128,15 +127,32 @@ impl Token {
     }
 }
 
+impl<S: AsRef<SecretKey>> OptionalFromRequestParts<S> for Token {
+    type Rejection = TokenDecryptionError;
+
+    fn from_request_parts(
+        parts: &mut Parts,
+        state: &S,
+    ) -> impl Future<Output = Result<Option<Self>, Self::Rejection>> + Send {
+        let secret_key = state.as_ref();
+
+        let token = parts
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|value| {
+                let (scheme, token) = value.to_str().ok()?.split_once(' ')?;
+                scheme
+                    .eq_ignore_ascii_case("bearer")
+                    .then(|| Self::decrypt(token, secret_key.as_ref()))
+            })
+            .transpose();
+
+        std::future::ready(token)
+    }
+}
+
 /// Error returned when [`Token::decrypt()`] fails.
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "will be used for authentication, needed now for testing"
-    )
-)]
 pub(super) enum TokenDecryptionError {
     /// Error decoding token as Base64.
     #[error("error decoding token as base64")]
@@ -167,6 +183,20 @@ impl From<base64::DecodeSliceError> for TokenDecryptionError {
 impl From<uuid::Error> for TokenDecryptionError {
     fn from(_: uuid::Error) -> Self {
         Self::Length
+    }
+}
+
+impl IntoResponse for TokenDecryptionError {
+    fn into_response(self) -> axum::response::Response {
+        match &self {
+            Self::Base64(_) | Self::Decrypt(_) | Self::Length => {
+                (StatusCode::UNAUTHORIZED, self.to_string()).into_response()
+            }
+            Self::UnknownVariant(_) => {
+                error!(error = %self, "error decoding authentication token");
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        }
     }
 }
 
